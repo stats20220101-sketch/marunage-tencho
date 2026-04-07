@@ -1,0 +1,29 @@
+# 環境変数・シークレット
+.env
+*.json
+service-account.json
+*service_account*.json
+*-service-account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Flask / SQLite
+instance/
+*.db
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# フォントキャッシュ（起動時に自動ダウンロード）
+fonts/

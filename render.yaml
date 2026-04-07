@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: store-support
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --workers 1 --timeout 120
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11"
+      # 以下の環境変数はRenderダッシュボードで手動設定してください
+      # SECRET_KEY
+      # LINE_CHANNEL_SECRET
+      # LINE_CHANNEL_ACCESS_TOKEN
+      # DATABASE_URL               ← SupabaseのPostgreSQL接続URL
+      # GOOGLE_CLIENT_ID
+      # GOOGLE_CLIENT_SECRET
+      # GOOGLE_REDIRECT_URI
+      # GOOGLE_DRIVE_ROOT_FOLDER_ID
+      # GOOGLE_SERVICE_ACCOUNT_JSON
+      # ANTHROPIC_API_KEY
+      # OPENAI_API_KEY
+      # SENDGRID_API_KEY
+      # ADMIN_EMAIL
+      # ENCRYPTION_KEY
