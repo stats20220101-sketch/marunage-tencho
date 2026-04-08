@@ -31,17 +31,13 @@ class Config:
     IMAGE_TEMP_RETENTION_DAYS = 30
 
     REQUIRED_VARS = [
-        "SECRET_KEY",
-        "LINE_CHANNEL_SECRET",
-        "LINE_CHANNEL_ACCESS_TOKEN",
-        "DATABASE_URL",
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
-        "ANTHROPIC_API_KEY",
-        "SENDGRID_API_KEY",
-        "ADMIN_EMAIL",
-        "ENCRYPTION_KEY",
-    ]
+    "SECRET_KEY",
+    "LINE_CHANNEL_SECRET",
+    "LINE_CHANNEL_ACCESS_TOKEN",
+    "DATABASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ENCRYPTION_KEY",
+]
 
     @classmethod
     def validate(cls):
