@@ -1010,6 +1010,10 @@ def _handle_event(event: dict):
             )
 
     elif state == "waiting_fee":
+        if not temp.get("media_queue"):
+            _reply_text(reply_token, "エラーが発生しました。最初からやり直してください。")
+            temp["state"] = "initial"
+            return
         current_media = temp["media_queue"][0]
         fee_text = text.replace(",", "").replace("円", "").strip()
         if not fee_text.isdigit():
