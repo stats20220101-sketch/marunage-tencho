@@ -44,7 +44,13 @@ def _get_or_create_folder(service, name: str, parent_id: str | None = None) -> s
 
     results = (
         service.files()
-        .list(q=query, fields="files(id, name)", pageSize=1)
+        .list(
+            q=query,
+            fields="files(id, name)",
+            pageSize=1,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
         .execute()
     )
 
@@ -59,7 +65,7 @@ def _get_or_create_folder(service, name: str, parent_id: str | None = None) -> s
     if parent_id:
         metadata["parents"] = [parent_id]
 
-    folder = service.files().create(body=metadata, fields="id").execute()
+    folder = service.files().create(body=metadata, fields="id", supportsAllDrives=True).execute()
     folder_id: str = folder["id"]
     logger.info("Driveフォルダ作成 | name=%s parent=%s id=%s", name, parent_id, folder_id)
     return folder_id
@@ -155,7 +161,7 @@ def upload_image(
     try:
         file = (
             service.files()
-            .create(body=metadata, media_body=media, fields="id")
+            .create(body=metadata, media_body=media, fields="id", supportsAllDrives=True)
             .execute()
         )
         file_id: str = file["id"]
@@ -206,16 +212,19 @@ def save_json_file(store, filename: str, data: dict) -> str:
         f" and '{folder_id}' in parents"
         " and trashed = false"
     )
-    results = service.files().list(q=query, fields="files(id)", pageSize=1).execute()
+    results = service.files().list(
+        q=query, fields="files(id)", pageSize=1,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
     files = results.get("files", [])
 
     if files:
         file_id = files[0]["id"]
-        service.files().update(fileId=file_id, media_body=media).execute()
+        service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
         logger.info("DriveJSON上書き | store_id=%s file=%s id=%s", store.id, filename, file_id)
     else:
         metadata = {"name": filename, "parents": [folder_id]}
-        created = service.files().create(body=metadata, media_body=media, fields="id").execute()
+        created = service.files().create(body=metadata, media_body=media, fields="id", supportsAllDrives=True).execute()
         file_id = created["id"]
         logger.info("DriveJSON作成 | store_id=%s file=%s id=%s", store.id, filename, file_id)
 
@@ -258,18 +267,21 @@ def upload_file(
         f" and '{folder_id}' in parents"
         " and trashed = false"
     )
-    results = service.files().list(q=query, fields="files(id)", pageSize=1).execute()
+    results = service.files().list(
+        q=query, fields="files(id)", pageSize=1,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
     files = results.get("files", [])
 
     if files:
         file_id = files[0]["id"]
-        service.files().update(fileId=file_id, media_body=media).execute()
+        service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
         logger.info("Driveファイル上書き | store_id=%s file=%s id=%s", store.id, filename, file_id)
     else:
         metadata = {"name": filename, "parents": [folder_id]}
         created = (
             service.files()
-            .create(body=metadata, media_body=media, fields="id")
+            .create(body=metadata, media_body=media, fields="id", supportsAllDrives=True)
             .execute()
         )
         file_id = created["id"]
@@ -300,7 +312,13 @@ def list_files(store, name_prefix: str) -> list[dict]:
     )
     results = (
         service.files()
-        .list(q=query, fields="files(id, name, createdTime)", pageSize=100)
+        .list(
+            q=query,
+            fields="files(id, name, createdTime)",
+            pageSize=100,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
         .execute()
     )
     return results.get("files", [])
@@ -333,6 +351,7 @@ def share_folder_with_email(store, email: str) -> None:
             body=permission,
             sendNotificationEmail=True,
             fields="id",
+            supportsAllDrives=True,
         ).execute()
         logger.info(
             "Driveフォルダ共有完了 | store_id=%s email=%s folder_id=%s",
@@ -370,14 +389,17 @@ def load_json_file(store, filename: str) -> dict | None:
         f" and '{folder_id}' in parents"
         " and trashed = false"
     )
-    results = service.files().list(q=query, fields="files(id)", pageSize=1).execute()
+    results = service.files().list(
+        q=query, fields="files(id)", pageSize=1,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
     files = results.get("files", [])
 
     if not files:
         return None
 
     file_id = files[0]["id"]
-    request = service.files().get_media(fileId=file_id)
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
     buf = io.BytesIO()
     downloader = MediaIoBaseDownload(buf, request)
     done = False
