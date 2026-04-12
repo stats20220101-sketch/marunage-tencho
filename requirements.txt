@@ -8,7 +8,8 @@ alembic==1.13.1
 google-auth==2.29.0
 google-auth-oauthlib==1.2.0
 google-api-python-client==2.127.0
-anthropic==0.26.0
+anthropic==0.86.0
+httpx>=0.28.0,<0.29.0
 sendgrid==6.11.0
 cryptography==42.0.7
 apscheduler==3.10.4
