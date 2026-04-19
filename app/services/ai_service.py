@@ -5,12 +5,28 @@ import logging
 
 import anthropic
 import openai
+from PIL import Image
 from flask import current_app
 
 logger = logging.getLogger(__name__)
 
 # TODO: URL診断機能（媒体ページの自動スコアリング）を実装予定
 # TODO: 月次レポート自動生成機能を実装予定
+
+
+def _resize_for_openai(image_data: bytes, max_side: int = 1024, jpeg_quality: int = 85) -> tuple[bytes, str]:
+    """
+    OpenAI API送信前に画像を縮小＋再圧縮してメモリ消費を抑える。
+
+    Returns:
+        (縮小後のバイト列, mime_type)  # mime_type は常に "image/jpeg"
+    """
+    with Image.open(io.BytesIO(image_data)) as img:
+        img = img.convert("RGB")
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=jpeg_quality, optimize=True)
+        return buf.getvalue(), "image/jpeg"
 
 
 def analyze_food_image(
@@ -163,21 +179,29 @@ def generate_improved_photo(
             f"{store_context}{style_context}"
         )
 
-    def _ext_for(mt: str) -> str:
-        if mt == "image/png":
-            return "png"
-        if mt == "image/webp":
-            return "webp"
-        return "jpg"
+    # 送信前に全画像を1024px・JPEG85に圧縮（OOM対策）
+    try:
+        src_small, _ = _resize_for_openai(image_data)
+    except Exception as e:
+        logger.warning("元画像リサイズ失敗、原本を使用: %s", e)
+        src_small = image_data
+
+    resized_refs: list[bytes] = []
+    for ref_bytes, _ in refs:
+        try:
+            rb, _ = _resize_for_openai(ref_bytes)
+            resized_refs.append(rb)
+        except Exception as e:
+            logger.warning("参考画像リサイズ失敗、スキップ: %s", e)
 
     # OpenAI API に渡すファイルリスト（1枚目=編集対象、2枚目以降=参考）
     files: list = []
-    src_buf = io.BytesIO(image_data)
-    src_buf.name = f"source.{_ext_for(media_type)}"
+    src_buf = io.BytesIO(src_small)
+    src_buf.name = "source.jpg"
     files.append(src_buf)
-    for i, (ref_bytes, ref_mime) in enumerate(refs, start=1):
-        ref_buf = io.BytesIO(ref_bytes)
-        ref_buf.name = f"ref{i}.{_ext_for(ref_mime)}"
+    for i, rb in enumerate(resized_refs, start=1):
+        ref_buf = io.BytesIO(rb)
+        ref_buf.name = f"ref{i}.jpg"
         files.append(ref_buf)
 
     try:
