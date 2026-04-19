@@ -1220,6 +1220,10 @@ def _handle_event(event: dict):
                 existing["world_view"] = extracted["world_view"]
             if extracted.get("keywords"):
                 existing["keywords"] = extracted["keywords"]
+            if extracted.get("photo_style"):
+                existing["photo_style"] = extracted["photo_style"]
+            if extracted.get("photo_style_en"):
+                existing["photo_style_en"] = extracted["photo_style_en"]
 
             # 参考写真を reference_images フォルダに保存（再登録時は既存をクリア）
             from app.services.drive_service import (
@@ -1318,34 +1322,13 @@ def _handle_event(event: dict):
             try:
                 from app.services.ai_service import generate_improved_photo
                 from app.services.style_guide_service import load_style_guide as _load_sg
-                from app.services.drive_service import (
-                    list_reference_images,
-                    download_file_bytes,
-                )
 
                 style = _load_sg(current_store)
-
-                # 参考画像をDriveから取得（最大3枚）
-                reference_images: list[tuple[bytes, str]] = []
-                try:
-                    ref_files = list_reference_images(current_store)
-                    for f in ref_files[:3]:
-                        try:
-                            data = download_file_bytes(f["id"])
-                            reference_images.append(
-                                (data, f.get("mimeType", "image/jpeg"))
-                            )
-                        except Exception as e:
-                            logger.warning("参考画像DL失敗: %s", e)
-                except Exception as e:
-                    logger.warning("参考画像一覧取得失敗: %s", e)
-
                 result_data = generate_improved_photo(
                     image_data=image_data,
                     media_type=mime_type,
                     store_name=current_store.name,
                     style_guide=style,
-                    reference_images=reference_images or None,
                 )
                 _push_text(line_user_id, MESSAGES["dalle_complete"])
                 _push_image(line_user_id, result_data)

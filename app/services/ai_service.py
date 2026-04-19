@@ -121,27 +121,28 @@ def generate_improved_photo(
     media_type: str = "image/jpeg",
     store_name: str = "",
     style_guide: dict | None = None,
-    reference_images: list[tuple[bytes, str]] | None = None,
 ) -> bytes:
     """
     料理写真を gpt-image-1 でリタッチする。
 
-    元写真を編集対象として入力し、参考画像があればスタイル参照として一緒に渡す。
-    構図・被写体は保ちつつ、照明・色味・トーンを参考画像に寄せる形でリタッチする。
+    参考写真は登録時に analyze_reference_photos で抽出されたテキストスタイル
+    （style_guide["photo_style_en"] 等）をプロンプトに埋め込む形で使用する。
+    元画像1枚だけをAPIに送るためメモリ消費を抑えつつ、参考写真の特徴を反映できる。
 
     Args:
         image_data: 元画像のバイトデータ
         media_type: 元画像のMIMEタイプ
         store_name: 店舗名（コンテキスト用）
-        style_guide: スタイルガイドdict
-        reference_images: [(bytes, mime_type), ...] 参考画像のリスト（最大3枚）
+        style_guide: スタイルガイドdict（photo_style_en, tone, world_view, keywordsを含む）
 
     Returns:
         gpt-image-1 が生成したリタッチ画像のバイトデータ（PNG）
     """
     # スタイルガイドを英語コンテキストに整形
+    photo_style_en = ""
     style_context = ""
     if style_guide:
+        photo_style_en = (style_guide.get("photo_style_en") or "").strip()
         tone = style_guide.get("tone", "")
         world_view = style_guide.get("world_view", "")
         keywords = style_guide.get("keywords", [])
@@ -156,13 +157,12 @@ def generate_improved_photo(
             style_context = f" The restaurant's style is: {'; '.join(parts)}."
 
     store_context = f" The restaurant is called '{store_name}'." if store_name else ""
-    refs = reference_images or []
 
-    if refs:
+    if photo_style_en:
         prompt_text = (
-            "Retouch the first image (the source food photo) so that its tone, "
-            "lighting, color palette, white balance, and overall atmosphere match "
-            "the style of the remaining images (the reference photos). "
+            "Retouch this food photo so that its tone, lighting, color palette, "
+            "white balance, composition framing, and overall atmosphere match "
+            f"this target reference style: {photo_style_en}. "
             "Keep the original subject, dish, and composition intact — do not "
             "change what is on the plate or rearrange items. "
             "Enhance brightness, clean up the background slightly, and improve "
@@ -179,36 +179,21 @@ def generate_improved_photo(
             f"{store_context}{style_context}"
         )
 
-    # 送信前に全画像を1024px・JPEG85に圧縮（OOM対策）
+    # 送信前に元画像を1024px・JPEG85に圧縮（OOM対策）
     try:
         src_small, _ = _resize_for_openai(image_data)
     except Exception as e:
         logger.warning("元画像リサイズ失敗、原本を使用: %s", e)
         src_small = image_data
 
-    resized_refs: list[bytes] = []
-    for ref_bytes, _ in refs:
-        try:
-            rb, _ = _resize_for_openai(ref_bytes)
-            resized_refs.append(rb)
-        except Exception as e:
-            logger.warning("参考画像リサイズ失敗、スキップ: %s", e)
-
-    # OpenAI API に渡すファイルリスト（1枚目=編集対象、2枚目以降=参考）
-    files: list = []
     src_buf = io.BytesIO(src_small)
     src_buf.name = "source.jpg"
-    files.append(src_buf)
-    for i, rb in enumerate(resized_refs, start=1):
-        ref_buf = io.BytesIO(rb)
-        ref_buf.name = f"ref{i}.jpg"
-        files.append(ref_buf)
 
     try:
         openai_client = openai.OpenAI(api_key=current_app.config["OPENAI_API_KEY"])
         response = openai_client.images.edit(
             model="gpt-image-1",
-            image=files,
+            image=src_buf,
             prompt=prompt_text,
             size="1024x1024",
             quality="medium",
@@ -217,8 +202,8 @@ def generate_improved_photo(
         image_b64_result = response.data[0].b64_json
         result_bytes = base64.b64decode(image_b64_result)
         logger.info(
-            "gpt-image-1 リタッチ完了 | store=%s refs=%d",
-            store_name, len(refs),
+            "gpt-image-1 リタッチ完了 | store=%s style_len=%d",
+            store_name, len(photo_style_en),
         )
         return result_bytes
     except Exception as e:
@@ -355,13 +340,23 @@ def analyze_reference_photos(
 
     prompt = (
         (f"店舗名：{store_name}\n" if store_name else "")
-        + "これらの参考写真から、お店のSNS・媒体展開に適したスタイルを分析してください。\n\n"
+        + "これらの参考写真から、お店のSNS・媒体展開に適したスタイルを分析してください。\n"
+        "店舗スタイルと、リタッチ用の詳細な撮影スタイル記述を両方出してください。\n"
+        "photo_style_en は後で英語のAI画像編集プロンプトに組み込むため英語で書いてください。\n\n"
         "以下のJSON形式のみで回答してください（前後に余分なテキストは不要）:\n"
         "{\n"
         '  "tone": "（雰囲気・トーン。例：高級感・洗練された / カジュアル・親しみやすい）",\n'
         '  "world_view": "（世界観・コンセプト。例：モダンなビストロ / アットホームな居酒屋）",\n'
         '  "keywords": ["キーワード1", "キーワード2", "キーワード3"],\n'
-        '  "summary": "（写真から読み取れる全体的な印象を2〜3文で）"\n'
+        '  "summary": "（写真から読み取れる全体的な印象を2〜3文で）",\n'
+        '  "photo_style": {\n'
+        '    "lighting": "（照明。例：暖色系の自然光、柔らかい側面光）",\n'
+        '    "color_palette": "（色調。例：温かみのあるアンバー系、全体に低彩度）",\n'
+        '    "composition": "（構図。例：料理中央・45度俯瞰、余白多め）",\n'
+        '    "background": "（背景。例：木目テーブルをぼかし、暗めの色）",\n'
+        '    "mood": "（全体の雰囲気。例：落ち着いた上質感、食欲をそそる温かさ）"\n'
+        '  },\n'
+        '  "photo_style_en": "（上記photo_styleを英語1文でまとめたもの。AIリタッチ用。例：warm natural side-lighting, low-saturation amber palette, 45-degree overhead composition with wooden table blurred in the background, calm upscale mood with appetizing warmth）"\n'
         "}"
     )
     content.append({"type": "text", "text": prompt})
@@ -385,6 +380,8 @@ def analyze_reference_photos(
                 "world_view": "",
                 "keywords": [],
                 "summary": result_text,
+                "photo_style": {},
+                "photo_style_en": "",
             }
 
         logger.info("参考写真解析完了 | store=%s photos=%d", store_name, len(images))
