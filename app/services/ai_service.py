@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import logging
 
@@ -104,28 +105,25 @@ def generate_improved_photo(
     media_type: str = "image/jpeg",
     store_name: str = "",
     style_guide: dict | None = None,
+    reference_images: list[tuple[bytes, str]] | None = None,
 ) -> bytes:
     """
-    料理写真をClaudeで分析してDALL-E 3用プロンプトを生成し、
-    改善イメージ画像をDALL-E 3で生成して返す。
+    料理写真を gpt-image-1 でリタッチする。
 
-    処理フロー:
-        1. Claude Vision で元写真を分析 → 英語プロンプト生成
-        2. DALL-E 3 で改善イメージ画像を生成（1024×1024）
-        3. 生成画像のバイトデータを返す
+    元写真を編集対象として入力し、参考画像があればスタイル参照として一緒に渡す。
+    構図・被写体は保ちつつ、照明・色味・トーンを参考画像に寄せる形でリタッチする。
 
     Args:
         image_data: 元画像のバイトデータ
         media_type: 元画像のMIMEタイプ
         store_name: 店舗名（コンテキスト用）
         style_guide: スタイルガイドdict
+        reference_images: [(bytes, mime_type), ...] 参考画像のリスト（最大3枚）
 
     Returns:
-        DALL-E 3が生成した画像のバイトデータ（JPEG）
+        gpt-image-1 が生成したリタッチ画像のバイトデータ（PNG）
     """
-    claude_client = anthropic.Anthropic(api_key=current_app.config["ANTHROPIC_API_KEY"])
-
-    # スタイルガイドを整形
+    # スタイルガイドを英語コンテキストに整形
     style_context = ""
     if style_guide:
         tone = style_guide.get("tone", "")
@@ -142,69 +140,65 @@ def generate_improved_photo(
             style_context = f" The restaurant's style is: {'; '.join(parts)}."
 
     store_context = f" The restaurant is called '{store_name}'." if store_name else ""
+    refs = reference_images or []
 
-    prompt_gen_instruction = (
-        "Look at this food/restaurant photo and create a DALL-E 3 prompt "
-        "for generating an improved version of this image optimized for SNS and food delivery sites."
-        f"{store_context}{style_context}\n\n"
-        "The prompt should describe:\n"
-        "- The dish or scene in detail\n"
-        "- Improved lighting (bright, natural light or warm studio lighting)\n"
-        "- Better composition and plating/styling\n"
-        "- A clean, appetizing presentation\n"
-        "- Professional food photography style\n\n"
-        "Return ONLY the English prompt text for DALL-E 3. "
-        "Do not include any explanation or extra text. "
-        "Keep it under 800 characters."
-    )
-
-    image_b64 = base64.standard_b64encode(image_data).decode("utf-8")
-
-    # Step 1: Claude でDALL-E 3用プロンプト生成
-    try:
-        claude_resp = claude_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_b64,
-                            },
-                        },
-                        {"type": "text", "text": prompt_gen_instruction},
-                    ],
-                }
-            ],
+    if refs:
+        prompt_text = (
+            "Retouch the first image (the source food photo) so that its tone, "
+            "lighting, color palette, white balance, and overall atmosphere match "
+            "the style of the remaining images (the reference photos). "
+            "Keep the original subject, dish, and composition intact — do not "
+            "change what is on the plate or rearrange items. "
+            "Enhance brightness, clean up the background slightly, and improve "
+            "the food presentation to look professional and appetizing on SNS "
+            "and food delivery sites."
+            f"{store_context}{style_context}"
         )
-        dalle_prompt = claude_resp.content[0].text.strip()
-        logger.info("DALL-E 3プロンプト生成完了 | store=%s prompt_len=%d", store_name, len(dalle_prompt))
-    except Exception as e:
-        logger.error("DALL-E 3プロンプト生成失敗: %s", e)
-        raise
+    else:
+        prompt_text = (
+            "Retouch this food photo to look professional and appetizing. "
+            "Enhance brightness, adjust white balance, and improve the food "
+            "presentation for SNS and food delivery sites. "
+            "Keep the original subject, dish, and composition intact."
+            f"{store_context}{style_context}"
+        )
 
-    # Step 2: DALL-E 3 で画像生成
+    def _ext_for(mt: str) -> str:
+        if mt == "image/png":
+            return "png"
+        if mt == "image/webp":
+            return "webp"
+        return "jpg"
+
+    # OpenAI API に渡すファイルリスト（1枚目=編集対象、2枚目以降=参考）
+    files: list = []
+    src_buf = io.BytesIO(image_data)
+    src_buf.name = f"source.{_ext_for(media_type)}"
+    files.append(src_buf)
+    for i, (ref_bytes, ref_mime) in enumerate(refs, start=1):
+        ref_buf = io.BytesIO(ref_bytes)
+        ref_buf.name = f"ref{i}.{_ext_for(ref_mime)}"
+        files.append(ref_buf)
+
     try:
         openai_client = openai.OpenAI(api_key=current_app.config["OPENAI_API_KEY"])
-        response = openai_client.images.generate(
-            model="dall-e-3",
-            prompt=dalle_prompt,
+        response = openai_client.images.edit(
+            model="gpt-image-1",
+            image=files,
+            prompt=prompt_text,
             size="1024x1024",
-            quality="standard",
-            response_format="b64_json",
+            quality="medium",
             n=1,
         )
         image_b64_result = response.data[0].b64_json
         result_bytes = base64.b64decode(image_b64_result)
-        logger.info("DALL-E 3画像生成完了 | store=%s", store_name)
+        logger.info(
+            "gpt-image-1 リタッチ完了 | store=%s refs=%d",
+            store_name, len(refs),
+        )
         return result_bytes
     except Exception as e:
-        logger.error("DALL-E 3画像生成失敗: %s", e)
+        logger.error("gpt-image-1 リタッチ失敗: %s", e)
         raise
 
 

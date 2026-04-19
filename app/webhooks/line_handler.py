@@ -200,15 +200,16 @@ MESSAGES = {
     ),
     "ai_thinking": "💭 少し考えますね...",
     "dalle_offer": (
-        "📸 DALL-E 3で改善イメージ画像を生成しますか？\n\n"
-        "改善案を元に「こんな感じで撮るとGood！」という\n"
-        "サンプル画像をAIが作ってくれます✨\n\n"
-        "1. 生成する\n"
+        "📸 AIで写真をリタッチしますか？\n\n"
+        "送ってくれた写真をベースに、登録済みの参考写真の\n"
+        "トーン・照明に寄せて色味を整えます✨\n"
+        "（参考写真が未登録なら一般的な料理写真風に整えます）\n\n"
+        "1. リタッチする\n"
         "2. スキップ"
     ),
-    "dalle_generating": "🎨 DALL-E 3で改善イメージを生成中です！\n少し時間がかかりますが、お待ちください～✨",
-    "dalle_complete": "✅ 改善イメージ画像を生成しました！\nこんな雰囲気で撮影してみてください📸",
-    "dalle_error": "ごめんなさい💦画像の生成に失敗しました。改善案を参考に撮り直してみてください！",
+    "dalle_generating": "🎨 AIリタッチ中です！\n少し時間がかかりますが、お待ちください～✨",
+    "dalle_complete": "✅ リタッチ画像を生成しました！\nこの雰囲気で撮影してみてください📸",
+    "dalle_error": "ごめんなさい💦リタッチに失敗しました。改善案を参考に撮り直してみてください！",
     "dalle_skip": "わかりました！改善案を参考に撮り直してみてください😊",
     "url_diagnosis_format": (
         "「URL診断：URL」の形式で送ってください！\n\n"
@@ -719,7 +720,7 @@ def _handle_image(line_user_id: str, reply_token: str, message: dict):
             _push_text(line_user_id, MESSAGES["text_overlay_error"])
         return
 
-    # ── 通常: AI改善案 → DALL-E 3再生成オファー ───────────
+    # ── 通常: AI改善案 → リタッチ提案 ────────────────────────
     _reply_text(reply_token, MESSAGES["image_receiving"])
     try:
         image_data, mime_type = download_line_image(message_id)
@@ -737,7 +738,7 @@ def _handle_image(line_user_id: str, reply_token: str, message: dict):
         _save_history(store.id, line_user_id, "user", "[写真を送信]")
         _save_history(store.id, line_user_id, "assistant", reply_message)
 
-        # DALL-E 3再生成を提案（元画像データをtempに保持）
+        # リタッチを提案（元画像データをtempに保持）
         temp["dalle_image_data"] = image_data
         temp["dalle_mime_type"] = mime_type
         temp["state"] = "waiting_dalle_confirm"
@@ -824,7 +825,7 @@ def _handle_event(event: dict):
             if state in ("ref_photo_collecting", "ref_photo_confirm"):
                 temp.pop("ref_photos", None)
                 temp.pop("ref_extracted", None)
-            # DALL-E確認フローをリセット
+            # リタッチ確認フローをリセット
             if state == "waiting_dalle_confirm":
                 temp.pop("dalle_image_data", None)
                 temp.pop("dalle_mime_type", None)
@@ -1220,18 +1221,26 @@ def _handle_event(event: dict):
             if extracted.get("keywords"):
                 existing["keywords"] = extracted["keywords"]
 
-            # 参考写真をDriveに保存
-            from app.services.drive_service import upload_image
+            # 参考写真を reference_images フォルダに保存（再登録時は既存をクリア）
+            from app.services.drive_service import (
+                upload_reference_image,
+                clear_reference_images,
+            )
 
-            for i, photo in enumerate(temp.get("ref_photos", []), 1):
+            try:
+                clear_reference_images(current_store)
+            except Exception as e:
+                logger.warning("参考画像クリア失敗（続行）: %s", e)
+
+            uploaded = 0
+            for photo in temp.get("ref_photos", []):
                 try:
-                    upload_image(
-                        requesting_store_id=current_store.id,
-                        target_store=current_store,
+                    upload_reference_image(
+                        store=current_store,
                         image_data=photo["data"],
-                        filename=f"ref_photo_{i}.jpg",
                         mime_type=photo.get("media_type", "image/jpeg"),
                     )
+                    uploaded += 1
                 except Exception as e:
                     logger.error("参考写真Drive保存失敗: %s", e)
 
@@ -1241,7 +1250,9 @@ def _handle_event(event: dict):
             temp["state"] = "initial"
             _reply_text(
                 reply_token,
-                "✅ 参考写真のスタイルをガイドに反映しました！\n写真もDriveに保存しました😊",
+                f"✅ 参考写真のスタイルをガイドに反映しました！\n"
+                f"写真{uploaded}枚を保存しました📸\n"
+                "次回、料理写真を送ると参考写真のトーンに寄せてリタッチできます✨",
             )
         elif text == "2":
             temp.pop("ref_photos", None)
@@ -1292,7 +1303,7 @@ def _handle_event(event: dict):
                 MESSAGES["google_link_email_saved_but_share_failed"],
             )
 
-    # ── DALL-E 3再生成確認 ──────────────────────────────────
+    # ── リタッチ（gpt-image-1）確認 ──────────────────────────
 
     elif state == "waiting_dalle_confirm":
         current_store = _get_current_store(line_user_id)
@@ -1307,18 +1318,39 @@ def _handle_event(event: dict):
             try:
                 from app.services.ai_service import generate_improved_photo
                 from app.services.style_guide_service import load_style_guide as _load_sg
+                from app.services.drive_service import (
+                    list_reference_images,
+                    download_file_bytes,
+                )
 
                 style = _load_sg(current_store)
+
+                # 参考画像をDriveから取得（最大3枚）
+                reference_images: list[tuple[bytes, str]] = []
+                try:
+                    ref_files = list_reference_images(current_store)
+                    for f in ref_files[:3]:
+                        try:
+                            data = download_file_bytes(f["id"])
+                            reference_images.append(
+                                (data, f.get("mimeType", "image/jpeg"))
+                            )
+                        except Exception as e:
+                            logger.warning("参考画像DL失敗: %s", e)
+                except Exception as e:
+                    logger.warning("参考画像一覧取得失敗: %s", e)
+
                 result_data = generate_improved_photo(
                     image_data=image_data,
                     media_type=mime_type,
                     store_name=current_store.name,
                     style_guide=style,
+                    reference_images=reference_images or None,
                 )
                 _push_text(line_user_id, MESSAGES["dalle_complete"])
                 _push_image(line_user_id, result_data)
             except Exception as e:
-                logger.error("DALL-E 3再生成失敗: %s", e)
+                logger.error("リタッチ失敗: %s", e)
                 _push_text(line_user_id, MESSAGES["dalle_error"])
         elif text == "2":
             temp.pop("dalle_image_data", None)
@@ -1328,7 +1360,7 @@ def _handle_event(event: dict):
         else:
             _reply_text(
                 reply_token,
-                "1か2の番号で答えてください！\n\n1. 生成する\n2. スキップ",
+                "1か2の番号で答えてください！\n\n1. リタッチする\n2. スキップ",
             )
 
     # ── URL診断：登録済み媒体の選択 ───────────────────────────

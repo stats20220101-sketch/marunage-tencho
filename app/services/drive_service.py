@@ -369,6 +369,91 @@ def share_folder_with_email(store, email: str) -> None:
         raise
 
 
+_REFERENCE_IMAGES_FOLDER_NAME = "reference_images"
+
+
+def _ensure_reference_images_folder(store) -> str:
+    """店舗フォルダ内のreference_imagesサブフォルダを取得/作成する。"""
+    parent_id = ensure_store_folder(store)
+    service = _build_drive_service()
+    return _get_or_create_folder(service, _REFERENCE_IMAGES_FOLDER_NAME, parent_id=parent_id)
+
+
+def upload_reference_image(store, image_data: bytes, mime_type: str = "image/jpeg") -> str:
+    """参考イメージ写真をDriveの reference_images フォルダにアップロードする。"""
+    folder_id = _ensure_reference_images_folder(store)
+    service = _build_drive_service()
+
+    ext = ".jpg"
+    if mime_type == "image/png":
+        ext = ".png"
+    elif mime_type == "image/webp":
+        ext = ".webp"
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    filename = f"ref_{timestamp}{ext}"
+
+    metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(
+        io.BytesIO(image_data),
+        mimetype=mime_type,
+        resumable=False,
+    )
+    file = service.files().create(
+        body=metadata, media_body=media, fields="id", supportsAllDrives=True
+    ).execute()
+    file_id: str = file["id"]
+    logger.info("参考画像アップロード完了 | store_id=%s file_id=%s", store.id, file_id)
+    return file_id
+
+
+def list_reference_images(store) -> list[dict]:
+    """店舗の参考画像一覧を返す。"""
+    folder_id = _ensure_reference_images_folder(store)
+    service = _build_drive_service()
+    query = f"'{folder_id}' in parents and trashed = false"
+    results = service.files().list(
+        q=query,
+        fields="files(id, name, mimeType, createdTime)",
+        pageSize=10,
+        orderBy="createdTime",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    return results.get("files", [])
+
+
+def download_file_bytes(file_id: str) -> bytes:
+    """ファイルIDから生バイトをダウンロードする。"""
+    service = _build_drive_service()
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buf.getvalue()
+
+
+def clear_reference_images(store) -> int:
+    """既存の参考画像を全て削除する（再登録時用）。削除した枚数を返す。"""
+    folder_id = _ensure_reference_images_folder(store)
+    service = _build_drive_service()
+    query = f"'{folder_id}' in parents and trashed = false"
+    results = service.files().list(
+        q=query, fields="files(id)", pageSize=50,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    files = results.get("files", [])
+    for f in files:
+        try:
+            service.files().delete(fileId=f["id"], supportsAllDrives=True).execute()
+        except HttpError as e:
+            logger.warning("参考画像削除失敗 | file_id=%s error=%s", f["id"], e)
+    logger.info("参考画像クリア | store_id=%s count=%d", store.id, len(files))
+    return len(files)
+
+
 def load_json_file(store, filename: str) -> dict | None:
     """
     店舗フォルダからJSONファイルを読み込む。
