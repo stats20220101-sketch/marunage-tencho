@@ -130,7 +130,7 @@ MESSAGES = {
         "🎨 「スタイルガイド登録」→ トーン・フォントを設定\n"
         "✍️ 「文字入れ：[テキスト]」→ 画像に文字を合成\n"
         "🔗 「Google連携」→ Driveフォルダを共有\n"
-        "🔍 「URL診断：URL」→ 掲載ページを診断\n"
+        "🔍 「URL診断」→ 登録済み媒体ページを診断\n"
         "📊 「月次レポート」→ 先月の活動レポートを生成\n"
         "🏪 「店舗追加」→ 別のお店を追加\n"
         "🔄 「店舗切替」→ 操作する店舗を変える\n"
@@ -145,7 +145,8 @@ MESSAGES = {
         "🖼 「参考写真登録」→ 写真からスタイル自動抽出\n"
         "🎨 「スタイルガイド登録」→ トーン・フォントを設定\n"
         "✍️ 「文字入れ：[テキスト]」→ 画像に文字を合成\n"
-        "🔍 「URL診断：URL」→ 掲載ページを診断\n"
+        "🔍 「URL診断」→ 登録済み媒体ページを診断\n"
+        "　（外部URL診断は「URL診断：URL」）\n"
         "📊 「月次レポート」→ 先月の活動レポートを生成\n"
         "🔗 「Google連携」→ Driveフォルダを共有\n"
         "💬 何でも聞いてください → AI経営相談\n"
@@ -217,6 +218,17 @@ MESSAGES = {
         "インスタグラムはログインが必要なため\n"
         "自動診断に対応していません🙏\n\n"
         "他の媒体（ホットペッパー・食べログなど）のURLをお試しください！"
+    ),
+    "url_diagnosis_select_media": (
+        "どの媒体を診断しますか？📋\n"
+        "番号で選んでください！\n\n"
+        "{}\n\n"
+        "別のURLを診断したい場合は「URL診断：URL」の形式で送ってください。"
+    ),
+    "url_diagnosis_no_media": (
+        "診断できる媒体URLが登録されていません💦\n\n"
+        "「店舗追加」から媒体URLを登録するか、\n"
+        "「URL診断：URL」の形式でURLを直接送ってください！"
     ),
     "url_diagnosis_start": "{}のページを診断します！\n\n",
     "url_diagnosis_fetching": "🔍 ページを取得・診断中です...\n少し待ってください！",
@@ -802,6 +814,7 @@ def _handle_event(event: dict):
             "ref_photo_collecting": "initial",
             "ref_photo_confirm": "initial",
             "waiting_dalle_confirm": "initial",
+            "waiting_url_diagnosis_store_media": "initial",
             "waiting_url_diagnosis_menu": "initial",
             "waiting_report_confirm": "initial",
         }
@@ -819,6 +832,8 @@ def _handle_event(event: dict):
             if state == "waiting_url_diagnosis_menu":
                 temp.pop("diagnosis_url", None)
                 temp.pop("diagnosis_media", None)
+            if state == "waiting_url_diagnosis_store_media":
+                temp.pop("diagnosis_media_options", None)
             # 月次レポートフローをリセット
             if state == "waiting_report_confirm":
                 temp.pop("report_year", None)
@@ -893,6 +908,40 @@ def _handle_event(event: dict):
             _reply_text(reply_token, MESSAGES["report_confirm"].format(year, month))
             return
 
+        if text == "URL診断":
+            current_store = _get_current_store(line_user_id)
+            if current_store is None:
+                _reply_text(reply_token, MESSAGES["not_registered"])
+                return
+            from app.models.media_account import MediaAccount
+            from app.extensions import db
+            media_accounts = (
+                db.session.query(MediaAccount)
+                .filter_by(store_id=current_store.id, is_active=True)
+                .all()
+            )
+            # instagram は自動診断不可、URL未登録も除外
+            candidates = [
+                m for m in media_accounts
+                if m.url and m.media_type != "instagram"
+            ]
+            if not candidates:
+                _reply_text(reply_token, MESSAGES["url_diagnosis_no_media"])
+                return
+            menu_lines = []
+            url_map = {}
+            for i, m in enumerate(candidates, start=1):
+                label = MEDIA_LABELS.get(m.media_type, m.media_type)
+                menu_lines.append(f"{i}. {label}")
+                url_map[str(i)] = {"url": m.url, "media_type": m.media_type}
+            temp["state"] = "waiting_url_diagnosis_store_media"
+            temp["diagnosis_media_options"] = url_map
+            _reply_text(
+                reply_token,
+                MESSAGES["url_diagnosis_select_media"].format("\n".join(menu_lines)),
+            )
+            return
+
         if text.startswith("URL診断：") or text.startswith("URL診断:"):
             current_store = _get_current_store(line_user_id)
             if current_store is None:
@@ -942,11 +991,18 @@ def _handle_event(event: dict):
 
     # ── 登録フロー ──────────────────────────────────────────
     if state == "initial":
-        if text in ("登録", "1"):
+        if text in ("登録", "1") and not stores:
             temp["state"] = "waiting_terms"
             _reply_text(reply_token, MESSAGES["terms"])
+        elif stores:
+            # 登録済みユーザーはAI相談にフォールバック
+            current_store = _get_current_store(line_user_id)
+            if current_store:
+                _handle_ai_consult(line_user_id, text, current_store, reply_token)
+            else:
+                _reply_text(reply_token, MESSAGES["not_registered"])
         else:
-            # 登録前はウェルカムメッセージ
+            # 未登録ユーザーはウェルカムメッセージ
             _reply_text(reply_token, MESSAGES["welcome"])
 
     elif state == "waiting_terms":
@@ -1274,6 +1330,36 @@ def _handle_event(event: dict):
                 reply_token,
                 "1か2の番号で答えてください！\n\n1. 生成する\n2. スキップ",
             )
+
+    # ── URL診断：登録済み媒体の選択 ───────────────────────────
+
+    elif state == "waiting_url_diagnosis_store_media":
+        options = temp.get("diagnosis_media_options", {})
+        if text not in options:
+            menu_lines = []
+            for k, v in options.items():
+                label = MEDIA_LABELS.get(v["media_type"], v["media_type"])
+                menu_lines.append(f"{k}. {label}")
+            _reply_text(
+                reply_token,
+                MESSAGES["url_diagnosis_select_media"].format("\n".join(menu_lines)),
+            )
+            return
+
+        selected = options[text]
+        url = selected["url"]
+        media_type = selected["media_type"]
+        temp.pop("diagnosis_media_options", None)
+
+        from app.services.url_diagnosis_service import DIAGNOSIS_MENU_TEXT
+        temp["state"] = "waiting_url_diagnosis_menu"
+        temp["diagnosis_url"] = url
+        temp["diagnosis_media"] = media_type
+        media_label = MEDIA_LABELS.get(media_type, "外部サイト")
+        _reply_text(
+            reply_token,
+            MESSAGES["url_diagnosis_start"].format(media_label) + DIAGNOSIS_MENU_TEXT,
+        )
 
     # ── URL診断モード選択 ───────────────────────────────────
 
