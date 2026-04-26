@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 
 from flask import Blueprint, request, abort, current_app
 from linebot.v3.messaging import (
@@ -772,16 +773,42 @@ def _handle_image(line_user_id: str, reply_token: str, message: dict):
 @line_bp.post("/webhook/line")
 @require_line_signature
 def webhook():
+    """
+    LINE Webhookエントリーポイント。
+
+    LINE側は数秒以内の200応答を要求し、それを超えるとリトライする。
+    画像分析・リタッチ等の重い処理は別スレッドに逃がして即200を返す。
+    """
     body = request.get_data(as_text=True)
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
         abort(400)
 
+    # アプリ実体（プロキシではなく）を取得してスレッドに渡す
+    app = current_app._get_current_object()
+
     for event in data.get("events", []):
-        _handle_event(event)
+        thread = threading.Thread(
+            target=_handle_event_async,
+            args=(app, event),
+            daemon=True,
+        )
+        thread.start()
 
     return {}, 200
+
+
+def _handle_event_async(app, event: dict):
+    """バックグラウンドスレッドでイベントを処理する。"""
+    with app.app_context():
+        try:
+            _handle_event(event)
+        except Exception as e:
+            logger.exception(
+                "Webhookイベント処理失敗（スレッド内） event_type=%s error=%s",
+                event.get("type"), e,
+            )
 
 
 def _handle_event(event: dict):
