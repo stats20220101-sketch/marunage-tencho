@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 # TODO: 月次レポート自動生成機能を実装予定
 
 
-def _resize_for_openai(image_data: bytes, max_side: int = 1024, jpeg_quality: int = 85) -> tuple[bytes, str]:
+def _resize_for_openai(image_data: bytes, max_side: int = 1024, jpeg_quality: int = 92) -> tuple[bytes, str]:
     """
     OpenAI API送信前に画像を縮小＋再圧縮してメモリ消費を抑える。
+    input_fidelity=high で使うため画質はやや高めにする（quality=92）。
 
     Returns:
         (縮小後のバイト列, mime_type)  # mime_type は常に "image/jpeg"
@@ -158,24 +159,32 @@ def generate_improved_photo(
 
     store_context = f" The restaurant is called '{store_name}'." if store_name else ""
 
+    # 料理を作り変えないよう強い制約を最初に置く
+    preservation_rules = (
+        "CRITICAL RULES (must follow strictly):\n"
+        "- Do NOT generate, replace, recreate, restyle, or rearrange any food items.\n"
+        "- Do NOT change the shape, size, count, quantity, position, or species of any ingredient.\n"
+        "- Do NOT change plates, dishware, garnishes, utensils, or background objects.\n"
+        "- Treat this as a professional photo retouching task: only adjust lighting, "
+        "white balance, color temperature, contrast, saturation, sharpness, and minor "
+        "background blur. Pixel-level structure of the food must remain identical.\n"
+    )
+
     if photo_style_en:
         prompt_text = (
-            "Retouch this food photo so that its tone, lighting, color palette, "
-            "white balance, composition framing, and overall atmosphere match "
-            f"this target reference style: {photo_style_en}. "
-            "Keep the original subject, dish, and composition intact — do not "
-            "change what is on the plate or rearrange items. "
-            "Enhance brightness, clean up the background slightly, and improve "
-            "the food presentation to look professional and appetizing on SNS "
-            "and food delivery sites."
+            preservation_rules
+            + "\nApply the following target style ONLY to lighting and color, "
+            f"never to the food itself: {photo_style_en}.\n"
+            "Result should look like the same photo professionally retouched, "
+            "appetizing for SNS and food delivery sites."
             f"{store_context}{style_context}"
         )
     else:
         prompt_text = (
-            "Retouch this food photo to look professional and appetizing. "
-            "Enhance brightness, adjust white balance, and improve the food "
-            "presentation for SNS and food delivery sites. "
-            "Keep the original subject, dish, and composition intact."
+            preservation_rules
+            + "\nProfessionally retouch the lighting and color so the photo looks "
+            "appetizing for SNS and food delivery sites. Subject and composition "
+            "must remain the same."
             f"{store_context}{style_context}"
         )
 
@@ -206,7 +215,8 @@ def generate_improved_photo(
             image=src_buf,
             prompt=prompt_text,
             size="1024x1024",
-            quality="low",
+            quality="high",
+            input_fidelity="high",
             n=1,
         )
         image_b64_result = response.data[0].b64_json
