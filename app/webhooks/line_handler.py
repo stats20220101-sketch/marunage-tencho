@@ -831,7 +831,7 @@ def _handle_image(line_user_id: str, reply_token: str, message: dict):
             store_name=store.name,
             style_guide=style,
         )
-        reply_message = f"📊 AI改善案です！\n\n{advice}\n\n参考にしてみてください😊"
+        reply_message = f"💡 ワンポイントアドバイス\n\n{advice}"
         _push_text(line_user_id, reply_message)
 
         # 改善案を会話履歴に保存
