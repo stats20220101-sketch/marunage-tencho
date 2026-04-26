@@ -150,6 +150,7 @@ MESSAGES = {
         "　（外部URL診断は「URL診断：URL」）\n"
         "📊 「月次レポート」→ 先月の活動レポートを生成\n"
         "🔗 「Google連携」→ Driveフォルダを共有\n"
+        "📋 「店舗プロフィール」→ 蓄積された店舗事実を確認\n"
         "💬 何でも聞いてください → AI経営相談\n"
         "↩️ 「やりなおす」→ 入力をやり直す"
     ),
@@ -747,10 +748,14 @@ def _handle_ai_consult(
 ):
     """
     コマンドに一致しない入力をClaudeに渡して経営相談として回答する。
-    店舗データ・スタイルガイド・会話履歴を全てコンテキストとして渡す。
+    店舗データ・スタイルガイド・facts・会話履歴を全てコンテキストとして渡す。
+    応答後はバックグラウンドで facts を更新する。
     """
     from app.services.ai_service import consult
     from app.services.style_guide_service import load_style_guide
+    from app.services.facts_service import (
+        load_store_facts, save_store_facts, format_facts_for_prompt,
+    )
     from app.models.media_account import MediaAccount
     from app.extensions import db
 
@@ -767,6 +772,8 @@ def _handle_ai_consult(
         .filter_by(store_id=store.id, is_active=True)
         .all()
     )
+    facts_data = load_store_facts(store)
+    facts_block = format_facts_for_prompt(facts_data)
     conversation_history = _load_history(store.id, line_user_id)
     # 最後に追加した今回のメッセージは除外（consult内で末尾に追加される）
     if conversation_history and conversation_history[-1]["content"] == user_message:
@@ -780,6 +787,7 @@ def _handle_ai_consult(
             conversation_history=conversation_history,
             style_guide=style_guide,
             media_accounts=media_accounts,
+            facts_block=facts_block,
         )
     except Exception as e:
         logger.error("AI経営相談失敗: %s", e)
@@ -789,6 +797,43 @@ def _handle_ai_consult(
     _save_history(store.id, line_user_id, "assistant", response)
 
     _push_text(line_user_id, response)
+
+    # 店舗事実をバックグラウンドで抽出・更新
+    try:
+        app = current_app._get_current_object()
+        store_id = store.id
+        threading.Thread(
+            target=_update_store_facts_async,
+            args=(app, store_id, user_message, response),
+            daemon=True,
+        ).start()
+    except Exception as e:
+        logger.warning("facts更新スレッド起動失敗: %s", e)
+
+
+def _update_store_facts_async(app, store_id: int, user_message: str, assistant_message: str):
+    """バックグラウンドで facts を抽出し Drive に保存する。"""
+    with app.app_context():
+        try:
+            from app.models.store import Store
+            from app.services.ai_service import extract_store_facts
+            from app.services.facts_service import load_store_facts, save_store_facts
+            from app.extensions import db
+
+            store = db.session.get(Store, store_id)
+            if store is None:
+                return
+
+            existing = load_store_facts(store)
+            updated_facts = extract_store_facts(
+                existing_facts=existing.get("facts", []),
+                user_message=user_message,
+                assistant_message=assistant_message,
+            )
+            existing["facts"] = updated_facts
+            save_store_facts(store, existing)
+        except Exception as e:
+            logger.exception("facts非同期更新失敗 store_id=%s error=%s", store_id, e)
 
 
 # ──────────────────────────────────────────────────────────
@@ -1166,6 +1211,18 @@ def _handle_event(event: dict):
             temp["state"] = "ref_photo_collecting"
             temp["ref_photos"] = []
             _reply_text(reply_token, MESSAGES["ref_photo_start"])
+            return
+
+        if text == "店舗プロフィール":
+            current_store = _get_current_store(line_user_id)
+            if current_store is None:
+                _reply_text(reply_token, MESSAGES["not_registered"])
+                return
+            from app.services.facts_service import (
+                load_store_facts, format_facts_for_display,
+            )
+            facts_data = load_store_facts(current_store)
+            _reply_text(reply_token, format_facts_for_display(facts_data))
             return
 
         if text == "Google連携":

@@ -246,21 +246,18 @@ def consult(
     conversation_history: list[dict],
     style_guide: dict | None = None,
     media_accounts: list | None = None,
+    facts_block: str = "",
 ) -> str:
     """
     飲食店専門コンサルタント「まるちゃん」として経営相談に回答する。
-
-    毎回のリクエストに店舗データ（名前・媒体・スタイルガイド）と
-    会話の全履歴をコンテキストとして渡す。
 
     Args:
         user_message: ユーザーのメッセージ
         store: Store モデルインスタンス
         conversation_history: 過去の会話履歴
-            [{"role": "user"|"assistant", "content": str}, ...]
-            ※ 現在はフル履歴。将来は直近3ヶ月＋重要サマリー方式に移行予定。
         style_guide: スタイルガイドdict
         media_accounts: 登録済み MediaAccount のリスト
+        facts_block: facts_service.format_facts_for_prompt() の出力（過去蓄積された店舗事実）
 
     Returns:
         AIの回答テキスト
@@ -289,6 +286,8 @@ def consult(
         if keywords:
             style_lines += f"  ・キーワード：{'、'.join(keywords)}\n"
 
+    facts_section = (f"\n{facts_block}\n" if facts_block else "")
+
     system_prompt = (
         "あなたは飲食店専門の経営コンサルタント「まるちゃん」です。\n\n"
         "【キャラクター設定】\n"
@@ -306,8 +305,9 @@ def consult(
         "登録媒体：\n"
         f"{media_lines if media_lines else '  （未登録）'}\n"
         "スタイルガイド：\n"
-        f"{style_lines if style_lines else '  （未登録）'}\n\n"
-        "上記の店舗データを踏まえた上で、具体的なアドバイスを提供してください。"
+        f"{style_lines if style_lines else '  （未登録）'}\n"
+        f"{facts_section}\n"
+        "上記の店舗データ・蓄積された事実を踏まえて、具体的なアドバイスを提供してください。"
     )
 
     # 会話履歴 ＋ 今回のメッセージ
@@ -329,6 +329,116 @@ def consult(
     except Exception as e:
         logger.error("コンサル回答生成失敗: %s", e)
         return "申し訳ありません、うまく回答できませんでした。もう一度試してみてください。"
+
+
+def extract_store_facts(
+    existing_facts: list[dict],
+    user_message: str,
+    assistant_message: str,
+) -> list[dict]:
+    """
+    最新の会話ターンから店舗の重要事実を抽出/更新する。
+
+    既存の facts に対して、新しい会話で得られた情報を追加・更新・削除する。
+    Claudeに既存事実+新会話を渡し、更新後の facts 配列を返してもらう。
+
+    Args:
+        existing_facts: 既存の facts のリスト
+            [{"category": "...", "text": "...", "updated_at": "..."}, ...]
+        user_message: ユーザーの最新メッセージ
+        assistant_message: AI の最新返信
+
+    Returns:
+        更新後の facts リスト
+    """
+    client = anthropic.Anthropic(api_key=current_app.config["ANTHROPIC_API_KEY"])
+
+    existing_lines = []
+    for f in existing_facts:
+        cat = f.get("category", "other")
+        text = (f.get("text") or "").strip()
+        if text:
+            existing_lines.append(f"- [{cat}] {text}")
+    existing_block = "\n".join(existing_lines) if existing_lines else "（まだ何もありません）"
+
+    instruction = (
+        "あなたは飲食店コンサルの記憶担当アシスタントです。\n"
+        "下の『既存の事実リスト』と『最新の会話ターン』を踏まえて、"
+        "店舗の重要事実リストを更新してください。\n\n"
+        "【カテゴリ】\n"
+        "- strength: 店舗の強み・看板メニュー・独自性\n"
+        "- challenge: 課題・悩み・伸び悩んでいる点\n"
+        "- goal: 目標・KPI・ありたい姿\n"
+        "- metric: 客単価・席数・回転率などの数値情報\n"
+        "- action: 現在実施中・最近実施した施策\n"
+        "- customer: 顧客層の特徴\n"
+        "- other: 上記に当てはまらない重要事実\n\n"
+        "【ルール】\n"
+        "- 雑談やあいさつ等の本質的でない情報は記録しない\n"
+        "- 既存事実と矛盾する新情報があれば、新しい方で上書きする\n"
+        "- 1事実は1〜2文以内に簡潔に\n"
+        "- 推測や決めつけはしない（ユーザーが明示した事実のみ）\n"
+        "- 重複を避ける\n"
+        "- 全体で最大15件程度に収める\n\n"
+        f"【既存の事実リスト】\n{existing_block}\n\n"
+        f"【最新の会話ターン】\n"
+        f"ユーザー：{user_message}\n"
+        f"AI：{assistant_message}\n\n"
+        "更新後の事実リストを以下のJSON形式のみで返してください（前後に余分な文字なし）：\n"
+        "{\n"
+        '  "facts": [\n'
+        '    {"category": "strength", "text": "..."},\n'
+        '    {"category": "challenge", "text": "..."}\n'
+        "  ]\n"
+        "}"
+    )
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": instruction}],
+        )
+        result_text = response.content[0].text.strip()
+
+        start = result_text.find("{")
+        end = result_text.rfind("}") + 1
+        if start == -1 or end <= start:
+            logger.warning("facts抽出: JSON見つからず | head=%s", result_text[:200])
+            return existing_facts
+
+        try:
+            parsed = json.loads(result_text[start:end])
+        except json.JSONDecodeError as je:
+            logger.error("facts抽出JSONパース失敗: %s | head=%s", je, result_text[:200])
+            return existing_facts
+
+        from datetime import datetime as _dt
+        now_iso = _dt.utcnow().isoformat()
+        valid_categories = {
+            "strength", "challenge", "goal",
+            "metric", "action", "customer", "other",
+        }
+        new_facts: list[dict] = []
+        for f in parsed.get("facts", []):
+            cat = f.get("category", "other")
+            text = (f.get("text") or "").strip()
+            if not text:
+                continue
+            if cat not in valid_categories:
+                cat = "other"
+            new_facts.append({
+                "category": cat,
+                "text": text,
+                "updated_at": now_iso,
+            })
+
+        logger.info("facts抽出完了 | before=%d after=%d", len(existing_facts), len(new_facts))
+        return new_facts
+
+    except Exception as e:
+        logger.error("facts抽出失敗: %s", e)
+        return existing_facts
 
 
 def analyze_reference_photos(
