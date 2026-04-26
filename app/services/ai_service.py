@@ -619,13 +619,14 @@ def generate_caption(
     )
 
     if is_menu_mode:
-        # メニュー紹介文モード
+        # グルメサイト共通メニュー紹介文モード（短文）
         media_specific_rules = (
-            f"【出力仕様（{media_label}）】\n"
-            f"・caption は『{dish_name}』のメニュー紹介文。120〜200字\n"
-            "・敬体で品名・特徴・魅力をコンパクトにまとめる\n"
-            "・媒体ページ内のメニュー説明欄やお店からのお知らせ欄に貼ることを想定\n"
-            "・hashtags / story_text / best_time は空文字"
+            "【出力仕様（グルメサイト用 メニュー紹介文）】\n"
+            f"・caption は『{dish_name}』の超短文メニュー紹介。**20〜30字以内**\n"
+            "・グルメサイト（ホットペッパー・食べログ・ぐるなび等）の\n"
+            "  メニューリストの説明欄に貼る一言として書く\n"
+            "・絵文字・記号はなし、敬体ではなく簡潔な体言止めや「。」止め\n"
+            "・hashtags / story_text / best_time / best_time_reason は空文字"
         )
     elif media_type == "instagram":
         media_specific_rules = (
@@ -633,14 +634,16 @@ def generate_caption(
             "・caption は200〜300字、改行を多用、絵文字も適度に使う\n"
             "・hashtags は20〜25個、店舗のジャンル・地域・料理名をミックス（# で始める）\n"
             "・story_text は10〜18字のストーリーズ用短文\n"
-            "・best_time は実際にInstagram利用者が多い時間帯から具体的に1つ"
+            "・best_time は曜日と時刻を具体的に1つ（例：金曜19時）\n"
+            "・best_time_reason は20〜35字でその時間帯がベストな理由を簡潔に"
         )
     else:  # google
         media_specific_rules = (
             "【出力仕様（Googleビジネスプロフィール投稿）】\n"
             "・caption は150〜250字、業務的で敬体、過度な絵文字なし\n"
             "・hashtags / story_text は空文字\n"
-            "・best_time は検索流入が増える時間帯から1つ"
+            "・best_time は時刻を具体的に1つ（例：11:30）\n"
+            "・best_time_reason は20〜35字でその時間帯がベストな理由を簡潔に"
         )
 
     situation_line = f"投稿の状況：{situation}\n" if situation else ""
@@ -662,7 +665,8 @@ def generate_caption(
         '  "caption": "本文",\n'
         '  "hashtags": "#xxx ...（該当なしは空文字）",\n'
         '  "story_text": "（該当なしは空文字）",\n'
-        '  "best_time": "おすすめ投稿時刻（該当なしは空文字）"\n'
+        '  "best_time": "おすすめ投稿時刻（該当なしは空文字）",\n'
+        '  "best_time_reason": "その時間帯がベストな理由（該当なしは空文字）"\n'
         "}"
     )
 
@@ -708,6 +712,7 @@ def generate_caption(
                 "hashtags": "",
                 "story_text": "",
                 "best_time": "",
+                "best_time_reason": "",
             }
 
         logger.info(

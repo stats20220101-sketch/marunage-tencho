@@ -514,7 +514,15 @@ def _generate_and_push_captions(
     dish_name: str,
     situation: str,
 ):
-    """登録済みの各媒体ごとに投稿用テキストを生成して個別メッセージで送信する。"""
+    """
+    登録済み媒体に応じて投稿用テキストを生成し、コピーしやすい形で配信する。
+
+    送信構成：
+      - グルメ媒体（hotpepper/tabelog/gurunavi）が1つでもあれば、
+        共通のメニュー紹介文（20〜30字）を1セットだけ送る
+      - Instagram / Google は個別に送る
+      - 各媒体ごとに「ヘッダー」と「本文」をメッセージ分割（コピペしやすく）
+    """
     from app.models.media_account import MediaAccount
     from app.extensions import db
     from app.services.ai_service import generate_caption
@@ -530,17 +538,50 @@ def _generate_and_push_captions(
     # 一度だけリファレンス本文を取得して全媒体で共用
     reference = _fetch_reference_content_for_store(store)
 
-    menu_label_map = {
-        "hotpepper": "📋 ホットペッパー メニュー紹介文",
-        "tabelog": "📋 食べログ メニュー紹介文",
-        "gurunavi": "📋 ぐるなび メニュー紹介文",
-    }
+    gourmet_types = {"hotpepper", "tabelog", "gurunavi"}
+    has_gourmet = any(m.media_type in gourmet_types for m in media_accounts)
+    sns_medias = [m for m in media_accounts if m.media_type in ("instagram", "google")]
+
+    # ── グルメ媒体共通：短いメニュー紹介文 ─────────────────────
+    if has_gourmet:
+        # 優先順位の高い登録媒体を1つ選ぶ（プロンプト用）
+        priority = ["hotpepper", "tabelog", "gurunavi"]
+        gourmet_media = None
+        for p in priority:
+            for m in media_accounts:
+                if m.media_type == p:
+                    gourmet_media = m
+                    break
+            if gourmet_media:
+                break
+        try:
+            result = generate_caption(
+                image_data=image_data,
+                media_type=gourmet_media.media_type,
+                store_name=store.name,
+                style_guide=style,
+                situation=situation,
+                dish_name=dish_name,
+                reference_content=reference,
+            )
+            caption = (result.get("caption") or "").strip()
+            _push_text(
+                line_user_id,
+                "📋 グルメサイト用 メニュー紹介文\n"
+                "（ホットペッパー・食べログ・ぐるなび 共通）",
+            )
+            if caption:
+                _push_text(line_user_id, caption)
+        except Exception as e:
+            logger.error("グルメ媒体メニュー紹介文生成失敗: %s", e)
+            _push_text(line_user_id, "⚠️ グルメサイト用メニュー紹介文の生成に失敗しました")
+
+    # ── SNS 媒体（Instagram / Google）：個別生成 ──────────────────
     sns_label_map = {
         "instagram": "📝 Instagram 投稿用キャプション",
         "google": "📝 Googleビジネスプロフィール 投稿用",
     }
-
-    for media in media_accounts:
+    for media in sns_medias:
         try:
             result = generate_caption(
                 image_data=image_data,
@@ -563,27 +604,29 @@ def _generate_and_push_captions(
         hashtags = (result.get("hashtags") or "").strip()
         story_text = (result.get("story_text") or "").strip()
         best_time = (result.get("best_time") or "").strip()
+        best_time_reason = (result.get("best_time_reason") or "").strip()
 
-        is_menu = media.media_type in ("hotpepper", "tabelog", "gurunavi")
-        header = (
-            menu_label_map.get(media.media_type, "📋 メニュー紹介文")
-            if is_menu
-            else sns_label_map.get(media.media_type, "📝 投稿用")
-        )
+        # ヘッダー（コピー対象外）
+        _push_text(line_user_id, sns_label_map.get(media.media_type, "📝 投稿用"))
 
-        body = f"{header}\n\n{caption}"
+        # 本文（コピー用）— Instagramの場合は本文+ハッシュタグ一括
+        body = caption
         if hashtags:
-            body += f"\n\n{hashtags}"
-        if best_time:
-            body += f"\n\n⏰ おすすめ投稿時刻：{best_time}"
-        _push_text(line_user_id, body)
+            body = f"{body}\n\n{hashtags}"
+        if body:
+            _push_text(line_user_id, body)
 
-        # Instagramのみストーリーズ用短文を別メッセージで
+        # Instagramのみストーリーズ用：ヘッダー + 本文を別メッセージで
         if media.media_type == "instagram" and story_text:
-            _push_text(
-                line_user_id,
-                f"📱 Instagramストーリーズ用テキスト\n\n{story_text}",
-            )
+            _push_text(line_user_id, "📱 Instagramストーリーズ用テキスト")
+            _push_text(line_user_id, story_text)
+
+        # 投稿時刻+理由（情報。コピー対象外）
+        if best_time:
+            time_msg = f"⏰ おすすめ投稿時刻：{best_time}"
+            if best_time_reason:
+                time_msg += f"\n💡 {best_time_reason}"
+            _push_text(line_user_id, time_msg)
 
 
 def _get_stores(line_user_id: str):
