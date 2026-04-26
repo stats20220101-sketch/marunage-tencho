@@ -217,6 +217,31 @@ MESSAGES = {
     ),
     "unshare_done": "✅ 「{}」の共有を解除しました！",
     "unshare_failed": "ごめんなさい💦共有解除に失敗しました。もう一度お試しください！",
+    "caption_offer": (
+        "📝 投稿用キャプションも作りますか？\n\n"
+        "登録済みの媒体（Instagram / Googleビジネスプロフィール 等）ごとに、\n"
+        "そのまま貼り付けて使えるテキストを生成します✨\n\n"
+        "1. 作る\n"
+        "2. いらない"
+    ),
+    "caption_ask_situation": (
+        "今回の投稿の「状況」を一言で送ってください📝\n\n"
+        "例：新メニュー / 季節限定 / 通常 / 週末ランチ / 平日ディナー など\n\n"
+        "※ 特に状況が無ければ「通常」と送ってください"
+    ),
+    "caption_no_media": (
+        "登録済みの媒体がありません💦\n"
+        "「店舗追加」または初期登録時に媒体を登録してください！"
+    ),
+    "caption_generating": (
+        "📝 各媒体ごとのキャプションを生成中...\n"
+        "登録媒体の数だけメッセージが届きます。少しお待ちください✨"
+    ),
+    "caption_session_expired": (
+        "セッションが切れました💦\n"
+        "もう一度料理写真を送ってリタッチからやり直してください！"
+    ),
+    "caption_skip": "わかりました！画像はDriveに保存されているので、必要な時にお使いください😊",
     "ai_thinking": "💭 少し考えますね...",
     "dalle_offer": (
         "📸 AIで写真をリタッチしますか？\n\n"
@@ -439,6 +464,64 @@ def _push_image(line_user_id: str, image_data: bytes):
             line_user_id,
             "画像のDrive保存またはLINE送信に失敗しました💦\nDriveを確認してください。",
         )
+
+
+def _generate_and_push_captions(line_user_id: str, store, image_data: bytes, situation: str):
+    """登録済みの各媒体ごとに投稿用キャプションを生成して個別メッセージで送信する。"""
+    from app.models.media_account import MediaAccount
+    from app.extensions import db
+    from app.services.ai_service import generate_caption
+    from app.services.style_guide_service import load_style_guide
+
+    style = load_style_guide(store)
+    media_accounts = (
+        db.session.query(MediaAccount)
+        .filter_by(store_id=store.id, is_active=True)
+        .all()
+    )
+
+    for media in media_accounts:
+        try:
+            result = generate_caption(
+                image_data=image_data,
+                media_type=media.media_type,
+                store_name=store.name,
+                style_guide=style,
+                situation=situation,
+            )
+        except Exception as e:
+            logger.error("キャプション生成失敗 | media=%s error=%s", media.media_type, e)
+            _push_text(
+                line_user_id,
+                f"⚠️ {MEDIA_LABELS.get(media.media_type, media.media_type)}のキャプション生成に失敗しました",
+            )
+            continue
+
+        # 媒体ごとにメッセージ整形
+        media_label = MEDIA_LABELS.get(media.media_type, media.media_type)
+        caption = (result.get("caption") or "").strip()
+        hashtags = (result.get("hashtags") or "").strip()
+        story_text = (result.get("story_text") or "").strip()
+        best_time = (result.get("best_time") or "").strip()
+        cta = (result.get("cta") or "").strip()
+
+        body = f"📝 {media_label} 投稿用\n\n{caption}"
+        if hashtags:
+            body += f"\n\n{hashtags}"
+        if cta:
+            body += f"\n\n🔘 CTAボタン提案：{cta}"
+        if best_time:
+            body += f"\n\n⏰ おすすめ投稿時刻：{best_time}"
+        body += "\n\n（このメッセージを長押しでコピーできます）"
+        _push_text(line_user_id, body)
+
+        # Instagramのみストーリーズ用短文を別メッセージで
+        if media.media_type == "instagram" and story_text:
+            _push_text(
+                line_user_id,
+                f"📱 Instagramストーリーズ用テキスト\n\n{story_text}\n\n"
+                "（画像に重ねて使ってね）",
+            )
 
 
 def _get_stores(line_user_id: str):
@@ -946,6 +1029,8 @@ def _handle_event(event: dict):
             "waiting_report_confirm": "initial",
             "waiting_google_email_confirm": "waiting_google_email",
             "waiting_unshare_select": "initial",
+            "waiting_caption_confirm": "initial",
+            "waiting_caption_situation": "initial",
         }
         if state in prev_map:
             temp["state"] = prev_map[state]
@@ -963,6 +1048,8 @@ def _handle_event(event: dict):
                 temp.pop("diagnosis_media", None)
             if state == "waiting_url_diagnosis_store_media":
                 temp.pop("diagnosis_media_options", None)
+            if state in ("waiting_caption_confirm", "waiting_caption_situation"):
+                temp.pop("last_retouch_image", None)
             # 月次レポートフローをリセット
             if state == "waiting_report_confirm":
                 temp.pop("report_year", None)
@@ -1537,6 +1624,10 @@ def _handle_event(event: dict):
                 )
                 _push_text(line_user_id, MESSAGES["dalle_complete"])
                 _push_image(line_user_id, result_data)
+                # リタッチ画像をtempに保持してキャプション生成オファーへ
+                temp["last_retouch_image"] = result_data
+                temp["state"] = "waiting_caption_confirm"
+                _push_text(line_user_id, MESSAGES["caption_offer"])
             except Exception as e:
                 logger.error("リタッチ失敗: %s", e)
                 _push_text(line_user_id, MESSAGES["dalle_error"])
@@ -1550,6 +1641,54 @@ def _handle_event(event: dict):
                 reply_token,
                 "1か2の番号で答えてください！\n\n1. リタッチする\n2. スキップ",
             )
+
+    # ── 投稿キャプション生成 ─────────────────────────────────
+
+    elif state == "waiting_caption_confirm":
+        if text == "1":
+            current_store = _get_current_store(line_user_id)
+            if current_store is None:
+                temp["state"] = "initial"
+                _reply_text(reply_token, MESSAGES["not_registered"])
+                return
+            from app.models.media_account import MediaAccount
+            from app.extensions import db
+            media_accounts = (
+                db.session.query(MediaAccount)
+                .filter_by(store_id=current_store.id, is_active=True)
+                .all()
+            )
+            if not media_accounts:
+                temp.pop("last_retouch_image", None)
+                temp["state"] = "initial"
+                _reply_text(reply_token, MESSAGES["caption_no_media"])
+                return
+            temp["state"] = "waiting_caption_situation"
+            _reply_text(reply_token, MESSAGES["caption_ask_situation"])
+        elif text == "2":
+            temp.pop("last_retouch_image", None)
+            temp["state"] = "initial"
+            _reply_text(reply_token, MESSAGES["caption_skip"])
+        else:
+            _reply_text(
+                reply_token,
+                "1か2の番号で答えてください！\n\n1. 作る\n2. いらない",
+            )
+
+    elif state == "waiting_caption_situation":
+        situation = text.strip()
+        image_data = temp.pop("last_retouch_image", None)
+        temp["state"] = "initial"
+        if image_data is None:
+            _reply_text(reply_token, MESSAGES["caption_session_expired"])
+            return
+        current_store = _get_current_store(line_user_id)
+        if current_store is None:
+            _reply_text(reply_token, MESSAGES["not_registered"])
+            return
+
+        _reply_text(reply_token, MESSAGES["caption_generating"])
+        _generate_and_push_captions(line_user_id, current_store, image_data, situation)
 
     # ── URL診断：登録済み媒体の選択 ───────────────────────────
 
