@@ -13,4 +13,12 @@ def init_extensions(app):
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+    # Render無料プランのspin-down対策：
+    # 接続腐敗（SSL decryption failed等）を防ぐため利用前に必ずping。
+    # pool_recycle で古い接続も定期的に破棄する。
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,  # 秒。Renderのアイドル切断より短めに設定
+    }
+
     db.init_app(app)
