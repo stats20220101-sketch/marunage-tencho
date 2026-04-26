@@ -126,19 +126,21 @@ def generate_improved_photo(
     media_type: str = "image/jpeg",
     store_name: str = "",
     style_guide: dict | None = None,
+    reference_images: list[tuple[bytes, str]] | None = None,
 ) -> bytes:
     """
     料理写真を gpt-image-1 でリタッチする。
 
-    参考写真は登録時に analyze_reference_photos で抽出されたテキストスタイル
-    （style_guide["photo_style_en"] 等）をプロンプトに埋め込む形で使用する。
-    元画像1枚だけをAPIに送るためメモリ消費を抑えつつ、参考写真の特徴を反映できる。
+    参考写真（最大3枚）が渡されたら、画像のままAPIに送って視覚的に
+    スタイルを寄せる（input_fidelity=high で元写真の構図は保持）。
+    補助情報として style_guide["photo_style_en"] もプロンプトに埋め込む。
 
     Args:
         image_data: 元画像のバイトデータ
         media_type: 元画像のMIMEタイプ
         store_name: 店舗名（コンテキスト用）
         style_guide: スタイルガイドdict（photo_style_en, tone, world_view, keywordsを含む）
+        reference_images: [(bytes, mime_type), ...] 参考画像のリスト（最大3枚）
 
     Returns:
         gpt-image-1 が生成したリタッチ画像のバイトデータ（PNG）
@@ -162,19 +164,44 @@ def generate_improved_photo(
             style_context = f" The restaurant's style is: {'; '.join(parts)}."
 
     store_context = f" The restaurant is called '{store_name}'." if store_name else ""
+    refs = reference_images or []
 
     # 料理を作り変えないよう強い制約を最初に置く
     preservation_rules = (
         "CRITICAL RULES (must follow strictly):\n"
-        "- Do NOT generate, replace, recreate, restyle, or rearrange any food items.\n"
-        "- Do NOT change the shape, size, count, quantity, position, or species of any ingredient.\n"
-        "- Do NOT change plates, dishware, garnishes, utensils, or background objects.\n"
+        "- The FIRST image is the source food photo to retouch.\n"
+        "- The remaining images (if any) are reference photos that show the desired "
+        "style/mood/lighting/color palette only — NEVER copy their food, dishes, "
+        "or composition.\n"
+        "- Do NOT generate, replace, recreate, restyle, or rearrange any food items "
+        "in the source image.\n"
+        "- Do NOT change the shape, size, count, quantity, position, or species of "
+        "any ingredient in the source image.\n"
+        "- Do NOT change plates, dishware, garnishes, utensils, or background objects "
+        "of the source image.\n"
         "- Treat this as a professional photo retouching task: only adjust lighting, "
         "white balance, color temperature, contrast, saturation, sharpness, and minor "
-        "background blur. Pixel-level structure of the food must remain identical.\n"
+        "background blur. The pixel-level structure of the food must remain identical.\n"
     )
 
-    if photo_style_en:
+    if refs and photo_style_en:
+        prompt_text = (
+            preservation_rules
+            + "\nMatch the visual mood/tone/lighting/color of the reference photos. "
+            f"Additional textual style hint: {photo_style_en}. "
+            "Result should look like the same source photo professionally retouched, "
+            "appetizing for SNS and food delivery sites."
+            f"{store_context}{style_context}"
+        )
+    elif refs:
+        prompt_text = (
+            preservation_rules
+            + "\nMatch the visual mood/tone/lighting/color of the reference photos. "
+            "Result should look like the same source photo professionally retouched, "
+            "appetizing for SNS and food delivery sites."
+            f"{store_context}{style_context}"
+        )
+    elif photo_style_en:
         prompt_text = (
             preservation_rules
             + "\nApply the following target style ONLY to lighting and color, "
@@ -192,21 +219,36 @@ def generate_improved_photo(
             f"{store_context}{style_context}"
         )
 
-    # 送信前に元画像を1024px・JPEG85に圧縮（OOM対策）
+    # 送信前に画像をリサイズ（OOM・帯域対策）
     try:
         src_small, _ = _resize_for_openai(image_data)
     except Exception as e:
         logger.warning("元画像リサイズ失敗、原本を使用: %s", e)
         src_small = image_data
 
+    resized_refs: list[bytes] = []
+    for ref_bytes, _ref_mime in refs[:3]:  # 最大3枚
+        try:
+            rb, _ = _resize_for_openai(ref_bytes)
+            resized_refs.append(rb)
+        except Exception as e:
+            logger.warning("参考画像リサイズ失敗、スキップ: %s", e)
+
+    # OpenAI API に渡すファイルリスト（1枚目=編集対象、2枚目以降=参考スタイル）
+    files: list = []
     src_buf = io.BytesIO(src_small)
     src_buf.name = "source.jpg"
+    files.append(src_buf)
+    for i, rb in enumerate(resized_refs, start=1):
+        ref_buf = io.BytesIO(rb)
+        ref_buf.name = f"ref{i}.jpg"
+        files.append(ref_buf)
 
     import time
     t_start = time.time()
     logger.info(
-        "gpt-image-1 リタッチ開始 | store=%s src_bytes=%d style_len=%d",
-        store_name, len(src_small), len(photo_style_en),
+        "gpt-image-1 リタッチ開始 | store=%s src_bytes=%d refs=%d style_len=%d",
+        store_name, len(src_small), len(resized_refs), len(photo_style_en),
     )
     try:
         # APIクライアントは120秒でタイムアウト（gunicornの240秒以内に収める）
@@ -216,7 +258,7 @@ def generate_improved_photo(
         )
         response = openai_client.images.edit(
             model="gpt-image-1",
-            image=src_buf,
+            image=files if len(files) > 1 else files[0],
             prompt=prompt_text,
             size="1024x1024",
             quality="high",
@@ -227,15 +269,15 @@ def generate_improved_photo(
         result_bytes = base64.b64decode(image_b64_result)
         elapsed = time.time() - t_start
         logger.info(
-            "gpt-image-1 リタッチ完了 | store=%s elapsed=%.1fs result_bytes=%d",
-            store_name, elapsed, len(result_bytes),
+            "gpt-image-1 リタッチ完了 | store=%s elapsed=%.1fs refs=%d result_bytes=%d",
+            store_name, elapsed, len(resized_refs), len(result_bytes),
         )
         return result_bytes
     except Exception as e:
         elapsed = time.time() - t_start
         logger.error(
-            "gpt-image-1 リタッチ失敗 | store=%s elapsed=%.1fs error=%s",
-            store_name, elapsed, e,
+            "gpt-image-1 リタッチ失敗 | store=%s elapsed=%.1fs refs=%d error=%s",
+            store_name, elapsed, len(resized_refs), e,
         )
         raise
 
