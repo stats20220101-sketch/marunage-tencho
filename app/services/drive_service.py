@@ -324,13 +324,14 @@ def list_files(store, name_prefix: str) -> list[dict]:
     return results.get("files", [])
 
 
-def share_folder_with_email(store, email: str) -> None:
+def share_folder_with_email(store, email: str, role: str = "reader") -> None:
     """
-    店舗のDriveフォルダを指定メールアドレスと共有する（writer権限）。
+    店舗のDriveフォルダを指定メールアドレスと共有する。
 
     Args:
         store: Store モデルインスタンス
         email: 共有先のGoogleアカウントメールアドレス
+        role: "reader" (閲覧のみ・推奨) / "writer" (編集可) / "commenter"
 
     Raises:
         RuntimeError: GOOGLE_SERVICE_ACCOUNT_JSON 未設定時
@@ -341,7 +342,7 @@ def share_folder_with_email(store, email: str) -> None:
 
     permission = {
         "type": "user",
-        "role": "writer",
+        "role": role,
         "emailAddress": email,
     }
 
@@ -354,19 +355,73 @@ def share_folder_with_email(store, email: str) -> None:
             supportsAllDrives=True,
         ).execute()
         logger.info(
-            "Driveフォルダ共有完了 | store_id=%s email=%s folder_id=%s",
-            store.id,
-            email,
-            folder_id,
+            "Driveフォルダ共有完了 | store_id=%s email=%s role=%s folder_id=%s",
+            store.id, email, role, folder_id,
         )
     except HttpError as e:
         logger.error(
             "Driveフォルダ共有失敗 | store_id=%s email=%s error=%s",
-            store.id,
-            email,
-            e,
+            store.id, email, e,
         )
         raise
+
+
+def list_folder_permissions(store) -> list[dict]:
+    """
+    店舗フォルダに付与されている権限の一覧を取得する。
+    サービスアカウント自身のowner権限は除外する。
+
+    Returns:
+        [{"id": str, "emailAddress": str, "role": str, "type": str}, ...]
+    """
+    folder_id = ensure_store_folder(store)
+    service = _build_drive_service()
+
+    results = service.permissions().list(
+        fileId=folder_id,
+        fields="permissions(id, emailAddress, role, type, displayName)",
+        supportsAllDrives=True,
+    ).execute()
+
+    perms = results.get("permissions", [])
+    # owner（サービスアカウント自身）は除外
+    return [p for p in perms if p.get("role") != "owner"]
+
+
+def revoke_folder_permission(store, permission_id: str) -> None:
+    """
+    店舗フォルダの権限を1件削除する。
+
+    Args:
+        store: Store モデルインスタンス
+        permission_id: 削除対象の permission id
+    """
+    folder_id = ensure_store_folder(store)
+    service = _build_drive_service()
+
+    try:
+        service.permissions().delete(
+            fileId=folder_id,
+            permissionId=permission_id,
+            supportsAllDrives=True,
+        ).execute()
+        logger.info(
+            "Drive権限削除完了 | store_id=%s permission_id=%s",
+            store.id, permission_id,
+        )
+    except HttpError as e:
+        logger.error(
+            "Drive権限削除失敗 | store_id=%s permission_id=%s error=%s",
+            store.id, permission_id, e,
+        )
+        raise
+
+
+def get_file_view_url(file_id: str) -> str:
+    """
+    DriveファイルのGoogle標準ビューワーURLを返す（権限を持つユーザーのみ閲覧可）。
+    """
+    return f"https://drive.google.com/file/d/{file_id}/view"
 
 
 _REFERENCE_IMAGES_FOLDER_NAME = "reference_images"

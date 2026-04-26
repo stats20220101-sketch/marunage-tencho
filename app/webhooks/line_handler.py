@@ -186,10 +186,18 @@ MESSAGES = {
         "（例：example@gmail.com）\n\n"
         "※ キャンセルする場合は「やりなおす」を送ってください"
     ),
+    "google_link_confirm": (
+        "次のメールアドレスにDriveフォルダの**閲覧権限**を付与します📧\n\n"
+        "▶ {}\n\n"
+        "間違いないですか？\n\n"
+        "1. 共有する\n"
+        "2. やり直す（メールアドレスを入力し直す）"
+    ),
     "google_link_saved": (
         "✅ Google連携完了！\n\n"
         "「{}」とDriveフォルダを共有しました😊\n"
-        "これからは改善案・参考写真をGoogleドライブで確認できます！"
+        "これからは改善案・参考写真をGoogleドライブで確認できます！\n\n"
+        "（解除したい場合は「連携解除」と送ってください）"
     ),
     "google_link_email_saved_but_share_failed": (
         "メールアドレスは保存しましたが、Driveフォルダの共有に失敗しました💦\n"
@@ -199,6 +207,16 @@ MESSAGES = {
         "メールアドレスの形式が正しくないようです。\n"
         "「example@gmail.com」のような形式で送ってください！"
     ),
+    "unshare_no_permissions": (
+        "現在、共有中のメールアドレスはありません😊"
+    ),
+    "unshare_confirm": (
+        "削除する共有先を番号で選んでください🗑\n\n"
+        "{}\n\n"
+        "※「やりなおす」でキャンセルできます"
+    ),
+    "unshare_done": "✅ 「{}」の共有を解除しました！",
+    "unshare_failed": "ごめんなさい💦共有解除に失敗しました。もう一度お試しください！",
     "ai_thinking": "💭 少し考えますね...",
     "dalle_offer": (
         "📸 AIで写真をリタッチしますか？\n\n"
@@ -401,6 +419,17 @@ def _push_image(line_user_id: str, image_data: bytes):
             "_push_image: LINE送信完了 | user=%s store_id=%s file_id=%s url=%s",
             line_user_id, store.id, file_id, image_url,
         )
+
+        # Driveの直接URLも送信（権限を持つユーザーのみ閲覧可）
+        try:
+            from app.services.drive_service import get_file_view_url
+            drive_url = get_file_view_url(file_id)
+            _push_text(
+                line_user_id,
+                f"📁 Driveでも確認できます！\nよかったら使ってね😊\n\n{drive_url}",
+            )
+        except Exception as e:
+            logger.warning("Drive URL送信失敗（続行）: %s", e)
     except Exception as e:
         logger.exception(
             "_push_image失敗 | user=%s store_id=%s error=%s",
@@ -915,6 +944,8 @@ def _handle_event(event: dict):
             "waiting_url_diagnosis_store_media": "initial",
             "waiting_url_diagnosis_menu": "initial",
             "waiting_report_confirm": "initial",
+            "waiting_google_email_confirm": "waiting_google_email",
+            "waiting_unshare_select": "initial",
         }
         if state in prev_map:
             temp["state"] = prev_map[state]
@@ -990,6 +1021,36 @@ def _handle_event(event: dict):
                 return
             temp["state"] = "waiting_google_email"
             _reply_text(reply_token, MESSAGES["google_link_ask"])
+            return
+
+        if text == "連携解除":
+            current_store = _get_current_store(line_user_id)
+            if current_store is None:
+                _reply_text(reply_token, MESSAGES["not_registered"])
+                return
+            from app.services.drive_service import list_folder_permissions
+            try:
+                perms = list_folder_permissions(current_store)
+            except Exception as e:
+                logger.error("Drive権限一覧取得失敗: %s", e)
+                _reply_text(reply_token, MESSAGES["unshare_failed"])
+                return
+            if not perms:
+                _reply_text(reply_token, MESSAGES["unshare_no_permissions"])
+                return
+            menu_lines = []
+            perm_map = {}
+            for i, p in enumerate(perms, start=1):
+                email = p.get("emailAddress") or p.get("displayName") or "(不明)"
+                role = p.get("role", "")
+                menu_lines.append(f"{i}. {email}（{role}）")
+                perm_map[str(i)] = {"id": p["id"], "email": email}
+            temp["state"] = "waiting_unshare_select"
+            temp["unshare_options"] = perm_map
+            _reply_text(
+                reply_token,
+                MESSAGES["unshare_confirm"].format("\n".join(menu_lines)),
+            )
             return
 
         if text == "月次レポート":
@@ -1378,9 +1439,27 @@ def _handle_event(event: dict):
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             _reply_text(reply_token, MESSAGES["google_link_invalid_email"])
             return
+        # 確認ステップへ
+        temp["pending_google_email"] = email
+        temp["state"] = "waiting_google_email_confirm"
+        _reply_text(reply_token, MESSAGES["google_link_confirm"].format(email))
 
+    elif state == "waiting_google_email_confirm":
+        if text == "2":
+            temp.pop("pending_google_email", None)
+            temp["state"] = "waiting_google_email"
+            _reply_text(reply_token, MESSAGES["google_link_ask"])
+            return
+        if text != "1":
+            _reply_text(
+                reply_token,
+                "1か2の番号で答えてください！\n\n1. 共有する\n2. やり直す",
+            )
+            return
+
+        email = temp.pop("pending_google_email", "").strip()
         current_store = _get_current_store(line_user_id)
-        if current_store is None:
+        if not email or current_store is None:
             temp["state"] = "initial"
             _reply_text(reply_token, MESSAGES["not_registered"])
             return
@@ -1392,8 +1471,8 @@ def _handle_event(event: dict):
 
         try:
             from app.services.drive_service import share_folder_with_email
-
-            share_folder_with_email(current_store, email)
+            # 安全のためデフォルトでreader権限
+            share_folder_with_email(current_store, email, role="reader")
             temp["state"] = "initial"
             _reply_text(reply_token, MESSAGES["google_link_saved"].format(email))
         except Exception as e:
@@ -1403,6 +1482,35 @@ def _handle_event(event: dict):
                 reply_token,
                 MESSAGES["google_link_email_saved_but_share_failed"],
             )
+
+    elif state == "waiting_unshare_select":
+        options = temp.get("unshare_options", {})
+        if text not in options:
+            menu_lines = [
+                f"{k}. {v['email']}" for k, v in options.items()
+            ]
+            _reply_text(
+                reply_token,
+                MESSAGES["unshare_confirm"].format("\n".join(menu_lines)),
+            )
+            return
+        selected = options[text]
+        current_store = _get_current_store(line_user_id)
+        temp.pop("unshare_options", None)
+        temp["state"] = "initial"
+        if current_store is None:
+            _reply_text(reply_token, MESSAGES["not_registered"])
+            return
+        try:
+            from app.services.drive_service import revoke_folder_permission
+            revoke_folder_permission(current_store, selected["id"])
+            _reply_text(
+                reply_token,
+                MESSAGES["unshare_done"].format(selected["email"]),
+            )
+        except Exception as e:
+            logger.error("Drive権限削除失敗: %s", e)
+            _reply_text(reply_token, MESSAGES["unshare_failed"])
 
     # ── リタッチ（gpt-image-1）確認 ──────────────────────────
 
