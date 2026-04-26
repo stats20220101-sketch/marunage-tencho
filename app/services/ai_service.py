@@ -439,27 +439,35 @@ def generate_caption(
     store_name: str = "",
     style_guide: dict | None = None,
     situation: str = "",
+    dish_name: str = "",
+    reference_content: str = "",
 ) -> dict:
     """
-    投稿用キャプションを生成する（媒体別）。
+    投稿用テキストを生成する（媒体別）。
+
+    投稿型媒体（instagram, google）→ SNS投稿用キャプション
+    グルメ媒体（hotpepper, tabelog, gurunavi）→ メニュー紹介文
 
     Args:
         image_data: リタッチ済み画像のバイトデータ
-        media_type: "instagram" / "google" / "hotpepper" / "tabelog" / "gurunavi"
+        media_type: 媒体種別
         store_name: 店舗名
-        style_guide: スタイルガイドdict（tone/world_view/keywords）
-        situation: 投稿の状況（例：「新メニュー」「季節限定」「通常」）
+        style_guide: スタイルガイドdict
+        situation: 投稿の状況（SNS媒体のみ使用）
+        dish_name: ユーザーが入力した料理名（必須・推測禁止のキー情報）
+        reference_content: 店舗公式ページから取得した本文（情報源として使用）
 
     Returns:
         {
-            "caption": str,       # メイン本文
-            "hashtags": str,      # ハッシュタグ部分（instagramのみ）
-            "story_text": str,    # ストーリーズ用短文（instagramのみ）
-            "best_time": str,     # おすすめ投稿時刻
-            "cta": str,           # CTAボタン提案（googleのみ）
+            "caption": str,       # 本文（SNS投稿）またはメニュー紹介文
+            "hashtags": str,      # Instagram のみ
+            "story_text": str,    # Instagram のみ
+            "best_time": str,     # SNS媒体のみ
         }
     """
     client = anthropic.Anthropic(api_key=current_app.config["ANTHROPIC_API_KEY"])
+
+    is_menu_mode = media_type in ("hotpepper", "tabelog", "gurunavi")
 
     style_lines = ""
     if style_guide:
@@ -476,50 +484,54 @@ def generate_caption(
     media_label = {
         "instagram": "Instagram（写真投稿）",
         "google": "Googleビジネスプロフィール（ローカル投稿）",
-        "hotpepper": "ホットペッパー（新着情報）",
-        "tabelog": "食べログ（お店からのお知らせ）",
-        "gurunavi": "ぐるなび（お知らせ）",
+        "hotpepper": "ホットペッパー（メニュー紹介文）",
+        "tabelog": "食べログ（メニュー紹介文）",
+        "gurunavi": "ぐるなび（メニュー紹介文）",
     }.get(media_type, media_type)
 
-    media_specific_rules = {
-        "instagram": (
-            "Instagramの投稿仕様：\n"
-            "・本文 caption は200〜300字、改行を多用して読みやすく、絵文字も適度に使う\n"
-            "・hashtags は20〜25個、店舗のジャンル・地域・料理名・SNS流行ワードをミックス\n"
-            "・story_text は10〜18字の短い惹句（ストーリーズに重ねる用）\n"
-            "・best_time は実際にInstagram利用者が多い時間帯（金土の19〜21時、平日昼休みなど）から具体的に1つ\n"
-            "・cta は空文字でよい"
-        ),
-        "google": (
-            "Googleビジネスプロフィールのローカル投稿仕様：\n"
-            "・caption は150〜250字、業務的で来店誘導につながる文体（過度な絵文字なし、敬体）\n"
-            "・hashtags は空文字（GBPはハッシュタグ非対応）\n"
-            "・story_text は空文字\n"
-            "・best_time は検索流入が増える時間帯（平日昼前、金土の17時前後など）\n"
-            "・cta は「予約する」「電話する」「ウェブサイト」「メニューを見る」から最適なもの1つ"
-        ),
-        "hotpepper": (
-            "ホットペッパーの新着情報仕様：\n"
-            "・caption は200〜350字、丁寧な敬体で店舗ニュースとして書く\n"
-            "・hashtags は空文字\n・story_text は空文字\n"
-            "・best_time は週末来店検討者が見る時間帯（木金の20〜22時など）\n"
-            "・cta は「ネット予約はこちら」など1つ"
-        ),
-        "tabelog": (
-            "食べログのお知らせ仕様：\n"
-            "・caption は200〜300字、お店からの一人称で丁寧に\n"
-            "・hashtags は空文字\n・story_text は空文字\n"
-            "・best_time は予約検討時間帯（平日19〜21時など）\n"
-            "・cta は「ネット予約」「電話予約」など1つ"
-        ),
-        "gurunavi": (
-            "ぐるなびのお知らせ仕様：\n"
-            "・caption は200〜300字、敬体でフォーマル寄り\n"
-            "・hashtags は空文字\n・story_text は空文字\n"
-            "・best_time は予約検討時間帯（平日19〜21時など）\n"
-            "・cta は「ネット予約」など1つ"
-        ),
-    }.get(media_type, "")
+    # 引用本文（あれば優先情報源として使う）
+    reference_block = ""
+    if reference_content:
+        truncated = reference_content[:3000]
+        reference_block = (
+            "【店舗公式ページから取得した本文】\n"
+            f"{truncated}\n\n"
+        )
+
+    # 厳守ルール（共通の幻覚抑制）
+    strict_rules = (
+        "【厳守ルール（最重要）】\n"
+        f"・料理名は『{dish_name}』のみ使用。別の料理名を発明・推測しない\n"
+        "・店舗の業態（料理ジャンル）は引用本文から読み取る。引用に書かれていない業態（例：韓国焼肉店なのにピザ店扱い）にしない\n"
+        "・引用に無い具体情報（材料、産地、調理時間、店主歴など）を勝手に作らない\n"
+        "・引用本文と画像から確認できる情報のみで書く\n"
+        "・不明な点は無理に補わず、確実な情報だけで構成する\n"
+    )
+
+    if is_menu_mode:
+        # メニュー紹介文モード
+        media_specific_rules = (
+            f"【出力仕様（{media_label}）】\n"
+            f"・caption は『{dish_name}』のメニュー紹介文。120〜200字\n"
+            "・敬体で品名・特徴・魅力をコンパクトにまとめる\n"
+            "・媒体ページ内のメニュー説明欄やお店からのお知らせ欄に貼ることを想定\n"
+            "・hashtags / story_text / best_time は空文字"
+        )
+    elif media_type == "instagram":
+        media_specific_rules = (
+            "【出力仕様（Instagram投稿）】\n"
+            "・caption は200〜300字、改行を多用、絵文字も適度に使う\n"
+            "・hashtags は20〜25個、店舗のジャンル・地域・料理名をミックス（# で始める）\n"
+            "・story_text は10〜18字のストーリーズ用短文\n"
+            "・best_time は実際にInstagram利用者が多い時間帯から具体的に1つ"
+        )
+    else:  # google
+        media_specific_rules = (
+            "【出力仕様（Googleビジネスプロフィール投稿）】\n"
+            "・caption は150〜250字、業務的で敬体、過度な絵文字なし\n"
+            "・hashtags / story_text は空文字\n"
+            "・best_time は検索流入が増える時間帯から1つ"
+        )
 
     situation_line = f"投稿の状況：{situation}\n" if situation else ""
 
@@ -527,18 +539,20 @@ def generate_caption(
 
     prompt = (
         (f"店舗名：{store_name}\n" if store_name else "")
+        + f"料理名：{dish_name}\n"
+        + (situation_line if not is_menu_mode else "")
         + (f"店舗のスタイル：\n{style_lines}\n" if style_lines else "")
-        + situation_line
-        + f"投稿先媒体：{media_label}\n\n"
-        "添付画像と上記情報をもとに、投稿用テキストを作成してください。\n\n"
-        f"{media_specific_rules}\n\n"
-        "以下のJSON形式のみで返してください（前後に余分な文字なし）：\n"
+        + f"投稿先：{media_label}\n\n"
+        + reference_block
+        + strict_rules
+        + "\n"
+        + media_specific_rules
+        + "\n\n以下のJSON形式のみで返してください（前後に余分な文字なし）：\n"
         "{\n"
         '  "caption": "本文",\n'
-        '  "hashtags": "#xxx #yyy ...（該当なしは空文字）",\n'
+        '  "hashtags": "#xxx ...（該当なしは空文字）",\n'
         '  "story_text": "（該当なしは空文字）",\n'
-        '  "best_time": "おすすめ投稿時刻",\n'
-        '  "cta": "CTAボタン文言（該当なしは空文字）"\n'
+        '  "best_time": "おすすめ投稿時刻（該当なしは空文字）"\n'
         "}"
     )
 
@@ -584,12 +598,13 @@ def generate_caption(
                 "hashtags": "",
                 "story_text": "",
                 "best_time": "",
-                "cta": "",
             }
 
         logger.info(
-            "キャプション生成完了 | media=%s caption_len=%d",
-            media_type, len(parsed.get("caption", "")),
+            "キャプション生成完了 | media=%s mode=%s caption_len=%d",
+            media_type,
+            "menu" if is_menu_mode else "sns",
+            len(parsed.get("caption", "")),
         )
         return parsed
 

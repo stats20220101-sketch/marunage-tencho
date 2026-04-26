@@ -218,14 +218,20 @@ MESSAGES = {
     "unshare_done": "✅ 「{}」の共有を解除しました！",
     "unshare_failed": "ごめんなさい💦共有解除に失敗しました。もう一度お試しください！",
     "caption_offer": (
-        "📝 投稿用キャプションも作りますか？\n\n"
-        "登録済みの媒体（Instagram / Googleビジネスプロフィール 等）ごとに、\n"
-        "そのまま貼り付けて使えるテキストを生成します✨\n\n"
+        "📝 投稿用テキストも作りますか？\n\n"
+        "登録済みの媒体ごとに、そのまま貼り付けて使えるテキストを生成します✨\n"
+        "・Instagram / Googleビジネスプロフィール → 投稿用キャプション\n"
+        "・ホットペッパー / 食べログ / ぐるなび → メニュー紹介文\n\n"
         "1. 作る\n"
         "2. いらない"
     ),
+    "caption_ask_dish_name": (
+        "料理名を教えてください🍽\n\n"
+        "例：特上カルビ / サムギョプサル / キムチチゲ など\n\n"
+        "※ 不明なら「不明」と送ってください"
+    ),
     "caption_ask_situation": (
-        "今回の投稿の「状況」を一言で送ってください📝\n\n"
+        "投稿の状況を一言で送ってください📝\n\n"
         "例：新メニュー / 季節限定 / 通常 / 週末ランチ / 平日ディナー など\n\n"
         "※ 特に状況が無ければ「通常」と送ってください"
     ),
@@ -466,8 +472,48 @@ def _push_image(line_user_id: str, image_data: bytes):
         )
 
 
-def _generate_and_push_captions(line_user_id: str, store, image_data: bytes, situation: str):
-    """登録済みの各媒体ごとに投稿用キャプションを生成して個別メッセージで送信する。"""
+def _fetch_reference_content_for_store(store) -> str:
+    """
+    店舗に紐づく媒体URLから、キャプション生成用のリファレンス本文を取得する。
+    優先順：hotpepper > tabelog > gurunavi > google
+    """
+    from app.models.media_account import MediaAccount
+    from app.extensions import db
+    from app.services.url_diagnosis_service import fetch_page_text
+
+    media_accounts = (
+        db.session.query(MediaAccount)
+        .filter_by(store_id=store.id, is_active=True)
+        .all()
+    )
+    by_type = {m.media_type: m for m in media_accounts if m.url}
+
+    for mtype in ("hotpepper", "tabelog", "gurunavi", "google"):
+        if mtype not in by_type:
+            continue
+        try:
+            content = fetch_page_text(by_type[mtype].url)
+            logger.info(
+                "リファレンス本文取得 | store_id=%s media=%s len=%d",
+                store.id, mtype, len(content),
+            )
+            return content
+        except Exception as e:
+            logger.warning(
+                "リファレンス取得失敗（次媒体に進む） media=%s error=%s",
+                mtype, e,
+            )
+    return ""
+
+
+def _generate_and_push_captions(
+    line_user_id: str,
+    store,
+    image_data: bytes,
+    dish_name: str,
+    situation: str,
+):
+    """登録済みの各媒体ごとに投稿用テキストを生成して個別メッセージで送信する。"""
     from app.models.media_account import MediaAccount
     from app.extensions import db
     from app.services.ai_service import generate_caption
@@ -480,6 +526,19 @@ def _generate_and_push_captions(line_user_id: str, store, image_data: bytes, sit
         .all()
     )
 
+    # 一度だけリファレンス本文を取得して全媒体で共用
+    reference = _fetch_reference_content_for_store(store)
+
+    menu_label_map = {
+        "hotpepper": "📋 ホットペッパー メニュー紹介文",
+        "tabelog": "📋 食べログ メニュー紹介文",
+        "gurunavi": "📋 ぐるなび メニュー紹介文",
+    }
+    sns_label_map = {
+        "instagram": "📝 Instagram 投稿用キャプション",
+        "google": "📝 Googleビジネスプロフィール 投稿用",
+    }
+
     for media in media_accounts:
         try:
             result = generate_caption(
@@ -488,39 +547,41 @@ def _generate_and_push_captions(line_user_id: str, store, image_data: bytes, sit
                 store_name=store.name,
                 style_guide=style,
                 situation=situation,
+                dish_name=dish_name,
+                reference_content=reference,
             )
         except Exception as e:
             logger.error("キャプション生成失敗 | media=%s error=%s", media.media_type, e)
             _push_text(
                 line_user_id,
-                f"⚠️ {MEDIA_LABELS.get(media.media_type, media.media_type)}のキャプション生成に失敗しました",
+                f"⚠️ {MEDIA_LABELS.get(media.media_type, media.media_type)}のテキスト生成に失敗しました",
             )
             continue
 
-        # 媒体ごとにメッセージ整形
-        media_label = MEDIA_LABELS.get(media.media_type, media.media_type)
         caption = (result.get("caption") or "").strip()
         hashtags = (result.get("hashtags") or "").strip()
         story_text = (result.get("story_text") or "").strip()
         best_time = (result.get("best_time") or "").strip()
-        cta = (result.get("cta") or "").strip()
 
-        body = f"📝 {media_label} 投稿用\n\n{caption}"
+        is_menu = media.media_type in ("hotpepper", "tabelog", "gurunavi")
+        header = (
+            menu_label_map.get(media.media_type, "📋 メニュー紹介文")
+            if is_menu
+            else sns_label_map.get(media.media_type, "📝 投稿用")
+        )
+
+        body = f"{header}\n\n{caption}"
         if hashtags:
             body += f"\n\n{hashtags}"
-        if cta:
-            body += f"\n\n🔘 CTAボタン提案：{cta}"
         if best_time:
             body += f"\n\n⏰ おすすめ投稿時刻：{best_time}"
-        body += "\n\n（このメッセージを長押しでコピーできます）"
         _push_text(line_user_id, body)
 
         # Instagramのみストーリーズ用短文を別メッセージで
         if media.media_type == "instagram" and story_text:
             _push_text(
                 line_user_id,
-                f"📱 Instagramストーリーズ用テキスト\n\n{story_text}\n\n"
-                "（画像に重ねて使ってね）",
+                f"📱 Instagramストーリーズ用テキスト\n\n{story_text}",
             )
 
 
@@ -1030,7 +1091,8 @@ def _handle_event(event: dict):
             "waiting_google_email_confirm": "waiting_google_email",
             "waiting_unshare_select": "initial",
             "waiting_caption_confirm": "initial",
-            "waiting_caption_situation": "initial",
+            "waiting_caption_dish_name": "initial",
+            "waiting_caption_situation": "waiting_caption_dish_name",
         }
         if state in prev_map:
             temp["state"] = prev_map[state]
@@ -1048,8 +1110,13 @@ def _handle_event(event: dict):
                 temp.pop("diagnosis_media", None)
             if state == "waiting_url_diagnosis_store_media":
                 temp.pop("diagnosis_media_options", None)
-            if state in ("waiting_caption_confirm", "waiting_caption_situation"):
+            if state in (
+                "waiting_caption_confirm",
+                "waiting_caption_dish_name",
+                "waiting_caption_situation",
+            ):
                 temp.pop("last_retouch_image", None)
+                temp.pop("caption_dish_name", None)
             # 月次レポートフローをリセット
             if state == "waiting_report_confirm":
                 temp.pop("report_year", None)
@@ -1663,8 +1730,8 @@ def _handle_event(event: dict):
                 temp["state"] = "initial"
                 _reply_text(reply_token, MESSAGES["caption_no_media"])
                 return
-            temp["state"] = "waiting_caption_situation"
-            _reply_text(reply_token, MESSAGES["caption_ask_situation"])
+            temp["state"] = "waiting_caption_dish_name"
+            _reply_text(reply_token, MESSAGES["caption_ask_dish_name"])
         elif text == "2":
             temp.pop("last_retouch_image", None)
             temp["state"] = "initial"
@@ -1675,11 +1742,21 @@ def _handle_event(event: dict):
                 "1か2の番号で答えてください！\n\n1. 作る\n2. いらない",
             )
 
+    elif state == "waiting_caption_dish_name":
+        dish_name = text.strip()
+        if not dish_name:
+            _reply_text(reply_token, MESSAGES["caption_ask_dish_name"])
+            return
+        temp["caption_dish_name"] = dish_name
+        temp["state"] = "waiting_caption_situation"
+        _reply_text(reply_token, MESSAGES["caption_ask_situation"])
+
     elif state == "waiting_caption_situation":
         situation = text.strip()
+        dish_name = temp.pop("caption_dish_name", "").strip()
         image_data = temp.pop("last_retouch_image", None)
         temp["state"] = "initial"
-        if image_data is None:
+        if image_data is None or not dish_name:
             _reply_text(reply_token, MESSAGES["caption_session_expired"])
             return
         current_store = _get_current_store(line_user_id)
@@ -1688,7 +1765,9 @@ def _handle_event(event: dict):
             return
 
         _reply_text(reply_token, MESSAGES["caption_generating"])
-        _generate_and_push_captions(line_user_id, current_store, image_data, situation)
+        _generate_and_push_captions(
+            line_user_id, current_store, image_data, dish_name, situation,
+        )
 
     # ── URL診断：登録済み媒体の選択 ───────────────────────────
 
