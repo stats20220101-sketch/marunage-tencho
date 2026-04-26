@@ -189,25 +189,40 @@ def generate_improved_photo(
     src_buf = io.BytesIO(src_small)
     src_buf.name = "source.jpg"
 
+    import time
+    t_start = time.time()
+    logger.info(
+        "gpt-image-1 リタッチ開始 | store=%s src_bytes=%d style_len=%d",
+        store_name, len(src_small), len(photo_style_en),
+    )
     try:
-        openai_client = openai.OpenAI(api_key=current_app.config["OPENAI_API_KEY"])
+        # APIクライアントは120秒でタイムアウト（gunicornの240秒以内に収める）
+        openai_client = openai.OpenAI(
+            api_key=current_app.config["OPENAI_API_KEY"],
+            timeout=120.0,
+        )
         response = openai_client.images.edit(
             model="gpt-image-1",
             image=src_buf,
             prompt=prompt_text,
             size="1024x1024",
-            quality="medium",
+            quality="low",
             n=1,
         )
         image_b64_result = response.data[0].b64_json
         result_bytes = base64.b64decode(image_b64_result)
+        elapsed = time.time() - t_start
         logger.info(
-            "gpt-image-1 リタッチ完了 | store=%s style_len=%d",
-            store_name, len(photo_style_en),
+            "gpt-image-1 リタッチ完了 | store=%s elapsed=%.1fs result_bytes=%d",
+            store_name, elapsed, len(result_bytes),
         )
         return result_bytes
     except Exception as e:
-        logger.error("gpt-image-1 リタッチ失敗: %s", e)
+        elapsed = time.time() - t_start
+        logger.error(
+            "gpt-image-1 リタッチ失敗 | store=%s elapsed=%.1fs error=%s",
+            store_name, elapsed, e,
+        )
         raise
 
 
