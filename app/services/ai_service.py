@@ -364,7 +364,7 @@ def analyze_reference_photos(
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+            max_tokens=1500,
             messages=[{"role": "user", "content": content}],
         )
         result_text = response.content[0].text.strip()
@@ -372,19 +372,31 @@ def analyze_reference_photos(
         # JSON部分のみ抽出
         start = result_text.find("{")
         end = result_text.rfind("}") + 1
+        parsed: dict | None = None
         if start != -1 and end > start:
-            parsed = json.loads(result_text[start:end])
-        else:
+            try:
+                parsed = json.loads(result_text[start:end])
+            except json.JSONDecodeError as je:
+                logger.error(
+                    "参考写真解析JSONパース失敗: %s | raw_head=%s",
+                    je, result_text[:300],
+                )
+                parsed = None
+
+        if parsed is None:
             parsed = {
                 "tone": "",
                 "world_view": "",
                 "keywords": [],
-                "summary": result_text,
+                "summary": result_text[:200],
                 "photo_style": {},
                 "photo_style_en": "",
             }
 
-        logger.info("参考写真解析完了 | store=%s photos=%d", store_name, len(images))
+        logger.info(
+            "参考写真解析完了 | store=%s photos=%d photo_style_en_len=%d",
+            store_name, len(images), len(parsed.get("photo_style_en", "") or ""),
+        )
         return parsed
 
     except Exception as e:
