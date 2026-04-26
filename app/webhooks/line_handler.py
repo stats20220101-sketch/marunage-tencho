@@ -309,7 +309,13 @@ def _push_image(line_user_id: str, image_data: bytes):
 
     store = _get_current_store(line_user_id)
     if store is None:
+        logger.warning("画像Push: 店舗未取得 | user=%s", line_user_id)
         return
+
+    logger.info(
+        "_push_image開始 | store_id=%s store_name=%s drive_folder_id=%s bytes=%d",
+        store.id, store.name, store.drive_folder_id, len(image_data),
+    )
 
     try:
         file_id = upload_image(
@@ -318,6 +324,10 @@ def _push_image(line_user_id: str, image_data: bytes):
             image_data=image_data,
             filename="text_overlay.jpg",
             mime_type="image/jpeg",
+        )
+        logger.info(
+            "_push_image: Drive保存成功 | store_id=%s file_id=%s",
+            store.id, file_id,
         )
         image_url = f"https://drive.google.com/uc?export=view&id={file_id}"
         api = _get_line_api()
@@ -332,12 +342,18 @@ def _push_image(line_user_id: str, image_data: bytes):
                 ],
             )
         )
-        logger.info("文字入れ画像送信完了 | user=%s file_id=%s", line_user_id, file_id)
+        logger.info(
+            "_push_image: LINE送信完了 | user=%s store_id=%s file_id=%s url=%s",
+            line_user_id, store.id, file_id, image_url,
+        )
     except Exception as e:
-        logger.error("画像Push失敗: %s", e)
+        logger.exception(
+            "_push_image失敗 | user=%s store_id=%s error=%s",
+            line_user_id, store.id, e,
+        )
         _push_text(
             line_user_id,
-            "文字入れは完了しましたが、画像の送信に失敗しました💦\nDriveを確認してください。",
+            "画像のDrive保存またはLINE送信に失敗しました💦\nDriveを確認してください。",
         )
 
 

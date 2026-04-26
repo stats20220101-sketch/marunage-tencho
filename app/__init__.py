@@ -63,13 +63,16 @@ def _start_scheduler(app: Flask):
 
 
 def _configure_logging(app: Flask):
-    level = logging.DEBUG if app.config.get("DEBUG") else logging.WARNING
+    level = logging.DEBUG if app.config.get("DEBUG") else logging.INFO
 
     logging.basicConfig(
         stream=sys.stdout,
         level=level,
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+        force=True,  # 既存ハンドラを上書き（gunicorn配下で重複設定を防止）
     )
 
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("googleapiclient").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
