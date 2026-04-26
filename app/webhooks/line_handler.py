@@ -3,7 +3,7 @@ import logging
 import re
 import threading
 
-from flask import Blueprint, request, abort, current_app
+from flask import Blueprint, request, abort, current_app, Response
 from linebot.v3.messaging import (
     ApiClient, Configuration, MessagingApi,
     ReplyMessageRequest, TextMessage, PushMessageRequest,
@@ -303,6 +303,49 @@ def _push_text(line_user_id: str, text: str):
         logger.error("Push送信失敗: %s", e)
 
 
+# ──────────────────────────────────────────────────────────
+# 画像配信エンドポイント（LINEからプレビュー取得される用）
+# ──────────────────────────────────────────────────────────
+
+
+def _detect_image_mime(data: bytes) -> str:
+    """画像バイトからMIMEタイプを簡易判定する。"""
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(data) >= 4 and data[:4] == b"RIFF":
+        return "image/webp"
+    return "image/jpeg"
+
+
+@line_bp.get("/image/<file_id>")
+def serve_image(file_id: str):
+    """
+    Drive上の画像をサービスアカウント経由でプロキシ配信する。
+
+    LINEのサーバーがこのURLを叩いて画像を取得することで、
+    Driveの直リンク（公開不可）を経由せずに画像を表示できる。
+    """
+    from app.services.drive_service import download_file_bytes
+
+    try:
+        data = download_file_bytes(file_id)
+    except Exception as e:
+        logger.exception("画像配信失敗 | file_id=%s error=%s", file_id, e)
+        return Response("Not Found", status=404)
+
+    mime = _detect_image_mime(data)
+    return Response(
+        data,
+        mimetype=mime,
+        headers={
+            "Cache-Control": "public, max-age=600",
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
 def _push_image(line_user_id: str, image_data: bytes):
     """加工済み画像をDriveにアップロードしてURLをLINEに送る。"""
     from app.services.drive_service import upload_image
@@ -313,9 +356,15 @@ def _push_image(line_user_id: str, image_data: bytes):
         logger.warning("画像Push: 店舗未取得 | user=%s", line_user_id)
         return
 
+    # 実態のMIMEを判定して保存名/MIMEを揃える
+    detected_mime = _detect_image_mime(image_data)
+    ext_map = {"image/png": ".png", "image/webp": ".webp", "image/jpeg": ".jpg"}
+    ext = ext_map.get(detected_mime, ".jpg")
+    save_filename = f"retouched{ext}"
+
     logger.info(
-        "_push_image開始 | store_id=%s store_name=%s drive_folder_id=%s bytes=%d",
-        store.id, store.name, store.drive_folder_id, len(image_data),
+        "_push_image開始 | store_id=%s store_name=%s drive_folder_id=%s bytes=%d mime=%s",
+        store.id, store.name, store.drive_folder_id, len(image_data), detected_mime,
     )
 
     try:
@@ -323,14 +372,19 @@ def _push_image(line_user_id: str, image_data: bytes):
             requesting_store_id=store.id,
             target_store=store,
             image_data=image_data,
-            filename="text_overlay.jpg",
-            mime_type="image/jpeg",
+            filename=save_filename,
+            mime_type=detected_mime,
         )
         logger.info(
             "_push_image: Drive保存成功 | store_id=%s file_id=%s",
             store.id, file_id,
         )
-        image_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+        # 公開ベースURL（PUBLIC_BASE_URL 未設定時はRenderの本番ドメイン）
+        base_url = (
+            current_app.config.get("PUBLIC_BASE_URL")
+            or "https://marunage-tencho.onrender.com"
+        ).rstrip("/")
+        image_url = f"{base_url}/image/{file_id}"
         api = _get_line_api()
         api.push_message(
             PushMessageRequest(

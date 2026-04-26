@@ -28,6 +28,10 @@ class Config:
 
     ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
 
+    # LINEがプレビュー取得するための公開ベースURL（/image/<file_id>用）
+    # 未設定時はコード側でRender本番URLにフォールバックする
+    PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL")
+
     IMAGE_TEMP_RETENTION_DAYS = 30
 
     REQUIRED_VARS = [
