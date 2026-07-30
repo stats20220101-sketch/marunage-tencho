@@ -1,0 +1,764 @@
+<title>覚書 3パターン 紙面イメージ</title>
+
+<style>
+  :root {
+    --ground: #E6E4DE;
+    --ground-2: #DEDCD5;
+    --paper: #FCFBF8;
+    --ink: #1C2027;
+    --ink-2: #4A5058;
+    --ink-3: #757B83;
+    --indigo: #2E4A6B;
+    --indigo-soft: #8FA6BE;
+    --vermilion: #B4432E;
+    --rule: #C7C4BA;
+    --rule-soft: #DFDCD3;
+    --shadow: 0 1px 2px rgba(28,32,39,.08), 0 8px 24px rgba(28,32,39,.10);
+
+    --font-mincho: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Hiragino Mincho Pro", "MS PMincho", serif;
+    --font-gothic: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic", "Noto Sans JP", "Meiryo", sans-serif;
+
+    --step-0: 0.9375rem;
+    --step-1: 1.0625rem;
+    --step-2: 1.375rem;
+    --step-3: 1.75rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #141619;
+      --ground-2: #1B1E22;
+      --paper: #24272C;
+      --ink: #E4E2DB;
+      --ink-2: #B0B4B9;
+      --ink-3: #858A90;
+      --indigo: #86A9CD;
+      --indigo-soft: #4A6683;
+      --vermilion: #D97A62;
+      --rule: #3A3E44;
+      --rule-soft: #2E3237;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #141619;
+    --ground-2: #1B1E22;
+    --paper: #24272C;
+    --ink: #E4E2DB;
+    --ink-2: #B0B4B9;
+    --ink-3: #858A90;
+    --indigo: #86A9CD;
+    --indigo-soft: #4A6683;
+    --vermilion: #D97A62;
+    --rule: #3A3E44;
+    --rule-soft: #2E3237;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  :root[data-theme="light"] {
+    --ground: #E6E4DE;
+    --ground-2: #DEDCD5;
+    --paper: #FCFBF8;
+    --ink: #1C2027;
+    --ink-2: #4A5058;
+    --ink-3: #757B83;
+    --indigo: #2E4A6B;
+    --indigo-soft: #8FA6BE;
+    --vermilion: #B4432E;
+    --rule: #C7C4BA;
+    --rule-soft: #DFDCD3;
+    --shadow: 0 1px 2px rgba(28,32,39,.08), 0 8px 24px rgba(28,32,39,.10);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-gothic);
+    font-size: var(--step-0);
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 5vw, 3.5rem) clamp(1rem, 4vw, 2rem) 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1.75rem, 4vw, 2.75rem);
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead { display: flex; flex-direction: column; gap: .6rem; }
+
+  .eyebrow {
+    font-size: .75rem;
+    letter-spacing: .18em;
+    color: var(--ink-3);
+    text-transform: none;
+  }
+
+  .masthead h1 {
+    font-family: var(--font-mincho);
+    font-size: var(--step-3);
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: .02em;
+    text-wrap: balance;
+  }
+
+  .masthead p {
+    color: var(--ink-2);
+    max-width: 62ch;
+  }
+
+  /* ---------- scale ---------- */
+
+  .scale {
+    background: var(--ground-2);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: 1.5rem clamp(1rem, 4vw, 2rem) 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .scale__head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: .8125rem;
+    color: var(--ink-2);
+  }
+
+  .scale__head span:last-child { text-align: right; }
+
+  .scale__track {
+    position: relative;
+    height: 1px;
+    background: var(--rule);
+    margin: 1.9rem 6% 0;
+  }
+
+  .pin {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .pin__dot {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: var(--ground-2);
+    border: 1.5px solid var(--ink-3);
+  }
+
+  .pin__label {
+    position: absolute;
+    bottom: 1.15rem;
+    font-family: var(--font-mincho);
+    font-size: 1rem;
+    color: var(--ink-2);
+    letter-spacing: .04em;
+  }
+
+  .pin--rec .pin__dot { background: var(--vermilion); border-color: var(--vermilion); width: 13px; height: 13px; }
+  .pin--rec .pin__label { color: var(--vermilion); font-weight: 600; }
+
+  .scale__note { font-size: .8125rem; color: var(--ink-3); }
+
+  /* ---------- common floor ---------- */
+
+  .floor {
+    border-left: 2px solid var(--indigo);
+    padding: .25rem 0 .25rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+
+  .floor h2 {
+    font-size: .875rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--indigo);
+  }
+
+  .floor ul { list-style: none; display: flex; flex-wrap: wrap; gap: .3rem 1.5rem; }
+  .floor li { font-size: .875rem; color: var(--ink-2); position: relative; padding-left: .9rem; }
+  .floor li::before {
+    content: "";
+    position: absolute; left: 0; top: .72em;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--indigo-soft);
+  }
+
+  /* ---------- docs ---------- */
+
+  .docs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: clamp(1.25rem, 3vw, 1.75rem);
+    align-items: start;
+  }
+
+  .doc { display: flex; flex-direction: column; gap: .85rem; }
+
+  .doc__head { display: flex; flex-direction: column; gap: .45rem; }
+
+  .doc__title { display: flex; align-items: baseline; gap: .6rem; }
+
+  .doc__key {
+    font-family: var(--font-mincho);
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--indigo);
+    font-weight: 600;
+  }
+
+  .doc--rec .doc__key { color: var(--vermilion); }
+
+  .doc__title h2 {
+    font-size: var(--step-1);
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+
+  .badge {
+    margin-left: auto;
+    font-size: .6875rem;
+    letter-spacing: .1em;
+    color: var(--vermilion);
+    border: 1px solid var(--vermilion);
+    border-radius: 1px;
+    padding: .1rem .4rem;
+    align-self: center;
+  }
+
+  .spec {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .1rem .8rem;
+    font-size: .8125rem;
+    border-top: 1px solid var(--rule-soft);
+    border-bottom: 1px solid var(--rule-soft);
+    padding: .55rem 0;
+  }
+
+  .spec dt { color: var(--ink-3); }
+  .spec dd { color: var(--ink-2); }
+
+  .meter { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: .35rem; }
+  .meter i {
+    width: 14px; height: 4px; border-radius: 1px;
+    background: var(--rule);
+    display: block;
+  }
+  .meter i.on { background: var(--indigo); }
+  .meter i.warn { background: var(--vermilion); opacity: .75; }
+
+  /* ---------- paper sheet ---------- */
+
+  .sheet-wrap { position: relative; }
+
+  .sheet {
+    background: var(--paper);
+    border: 1px solid var(--rule-soft);
+    box-shadow: var(--shadow);
+    padding: 1.9rem 1.6rem 2.2rem;
+    font-family: var(--font-mincho);
+    font-size: .75rem;
+    line-height: 1.95;
+    color: var(--ink);
+    letter-spacing: .01em;
+    max-height: 26rem;
+    overflow: hidden;
+  }
+
+  .sheet-wrap.is-open .sheet { max-height: none; }
+
+  .sheet h3 {
+    text-align: center;
+    font-size: .9375rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    margin-bottom: 1.4rem;
+  }
+
+  .sheet p { text-indent: 1em; margin-bottom: .5rem; text-align: justify; }
+  .sheet p.flush { text-indent: 0; }
+  .sheet p.center { text-indent: 0; text-align: center; margin: .9rem 0; }
+
+  .sheet h4 {
+    font-weight: 600;
+    margin: 1rem 0 .25rem;
+    letter-spacing: .03em;
+  }
+
+  .sheet ol { list-style: none; margin-bottom: .5rem; }
+  .sheet ol li { padding-left: 2em; text-indent: -2em; margin-bottom: .2rem; text-align: justify; }
+  .sheet ol.sub li { padding-left: 3.4em; text-indent: -1.8em; }
+
+  .sheet hr {
+    border: 0;
+    border-top: 1px solid var(--rule-soft);
+    margin: 1.2rem 0;
+  }
+
+  .sheet table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: .7rem 0 .3rem;
+    font-size: .75rem;
+  }
+  .sheet th, .sheet td {
+    border: 1px solid var(--rule);
+    padding: .28rem .5rem;
+    text-align: left;
+    font-weight: 400;
+  }
+  .sheet th { background: var(--ground-2); color: var(--ink-2); white-space: nowrap; }
+
+  .sig { margin-top: 1.6rem; display: flex; flex-direction: column; gap: .85rem; }
+  .sig__row { display: flex; align-items: flex-start; gap: .7rem; }
+  .sig__lines { flex: 1; display: flex; flex-direction: column; gap: .15rem; }
+  .sig__lines span { border-bottom: 1px solid var(--rule); padding-bottom: .1rem; color: var(--ink-2); }
+
+  .seal {
+    width: 2.6rem; height: 2.6rem;
+    flex: 0 0 auto;
+    border: 1px solid var(--vermilion);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: var(--vermilion);
+    font-size: .625rem;
+    letter-spacing: .05em;
+    opacity: .55;
+    margin-top: .3rem;
+  }
+
+  .fade {
+    position: absolute;
+    left: 1px; right: 1px; bottom: 1px;
+    height: 5.5rem;
+    background: linear-gradient(to bottom, transparent, var(--paper) 78%);
+    pointer-events: none;
+  }
+
+  .sheet-wrap.is-open .fade { display: none; }
+
+  .toggle {
+    align-self: flex-start;
+    font: inherit;
+    font-size: .8125rem;
+    color: var(--indigo);
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--indigo-soft);
+    padding: 0 0 1px;
+    cursor: pointer;
+  }
+  .toggle:hover { border-bottom-color: var(--indigo); }
+  .toggle:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; }
+
+  .doc__note {
+    font-size: .8125rem;
+    color: var(--ink-2);
+    line-height: 1.8;
+  }
+
+  .doc__note strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- footer ---------- */
+
+  .closing {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    font-size: .8125rem;
+    color: var(--ink-2);
+    max-width: 66ch;
+  }
+
+  .closing h2 {
+    font-family: var(--font-mincho);
+    font-size: var(--step-1);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  @media (max-width: 600px) {
+    .scale__track { margin-left: 10%; margin-right: 10%; }
+    .sheet { padding: 1.5rem 1.15rem 1.8rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">久茂地リバーサイドテラス　店舗ガス設備の件</p>
+    <h1>覚書 3パターンの紙面イメージ</h1>
+    <p>硬い書面ほど後から覆されにくくなりますが、その分、家主に身構えられて対立を招くリスクがあります。やわらかすぎれば残す意味が薄れます。そのバランスをどこに置くかの判断です。</p>
+  </header>
+
+  <section class="scale" aria-label="3パターンの位置づけ">
+    <div class="scale__head">
+      <span>やわらかい<br>摩擦は小さいが、守りは弱い</span>
+      <span>硬い<br>守りは強いが、摩擦は大きい</span>
+    </div>
+    <div class="scale__track">
+      <div class="pin" style="left: 8%"><span class="pin__label">C</span><span class="pin__dot"></span></div>
+      <div class="pin pin--rec" style="left: 50%"><span class="pin__label">B</span><span class="pin__dot"></span></div>
+      <div class="pin" style="left: 92%"><span class="pin__label">A</span><span class="pin__dot"></span></div>
+    </div>
+    <p class="scale__note">今回は面談を先に行うため、書面は「先日のご確認」という位置づけになります。その前提であれば B でも硬すぎる印象にはなりません。</p>
+  </section>
+
+  <section class="floor">
+    <h2>どのパターンでも必ず入れている4点</h2>
+    <ul>
+      <li>建替え着手までは移設・撤去をしない</li>
+      <li>撤去費用は店舗側の負担なし</li>
+      <li>ダクトと退去時期はこの書面では扱わない</li>
+      <li>過去の経緯は今後蒸し返さない</li>
+    </ul>
+  </section>
+
+  <div class="docs">
+
+    <!-- ============ A ============ -->
+    <article class="doc">
+      <div class="doc__head">
+        <div class="doc__title">
+          <span class="doc__key">A</span>
+          <h2>覚書（通常版）</h2>
+        </div>
+        <dl class="spec">
+          <dt>体裁</dt><dd>契約書調・第1条〜第10条</dd>
+          <dt>分量</dt><dd>2〜3枚</dd>
+          <dt>守り</dt><dd>強<span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i></span></dd>
+          <dt>摩擦</dt><dd>大<span class="meter"><i class="warn"></i><i class="warn"></i><i class="warn"></i></span></dd>
+        </dl>
+      </div>
+
+      <div class="sheet-wrap" id="wrap-a">
+        <div class="sheet">
+          <h3>ガス設備の継続設置及び使用に関する覚書</h3>
+          <p>＿＿＿＿＿＿＿＿（以下「甲」という。）、＿＿＿＿＿＿＿＿（以下「乙」という。）及び協和ガス株式会社（以下「丙」という。）は、甲が所有し管理する後記物件の表示記載の建物（以下「本件建物」という。）内において乙が営業する店舗（以下「本件店舗」という。）に係るガス設備の設置及び使用に関し、以下のとおり合意し、本覚書を締結する。</p>
+
+          <h4>第1条（目的）</h4>
+          <p>本覚書は、本件建物の建替え工事に着手するまでの間、本件店舗において現に設置され使用されているガス設備を現状のまま継続して設置し、及び使用することについて、甲乙丙三者の認識を明確にし、後日の疑義を防止することを目的とする。</p>
+
+          <h4>第2条（対象設備）</h4>
+          <ol>
+            <li>1．　本覚書の対象となる設備（以下「本件設備」という。）は、次のとおりとする。</li>
+          </ol>
+          <ol class="sub">
+            <li>(1)　GHP空調機　＿＿台</li>
+            <li>(2)　ガスバルク貯槽　＿＿基（容量　＿＿kg）</li>
+            <li>(3)　ガス配管、調整器その他の付属設備一式</li>
+            <li>(4)　ガス器具一式</li>
+          </ol>
+          <ol>
+            <li>2．　本件設備の所有者は丙とする。</li>
+            <li>3．　本件設備の設置場所は、本覚書締結日現在における設置場所とし、その詳細は別紙（配置図及び写真）のとおりとする。</li>
+          </ol>
+
+          <h4>第3条（継続設置及び使用の承諾）</h4>
+          <ol>
+            <li>1．　甲は、丙が本件設備を前条第3項の設置場所において次条に定める期間中引き続き設置すること、及び乙がこれを使用することを承諾する。</li>
+            <li>2．　甲は、次条に定める期間中、正当な理由なく本件設備の移設、撤去又は変更を求めないものとする。</li>
+            <li>3．　乙及び丙は、次条に定める期間中、甲の書面による事前の承諾を得ることなく、本件設備の設置場所を変更し、又は新たな設備を増設しないものとする。</li>
+          </ol>
+
+          <h4>第4条（期間）</h4>
+          <ol>
+            <li>1．　本覚書に基づく本件設備の設置及び使用の期間は、本覚書締結の日から、次の各号に定める日のいずれか早い日までとする。</li>
+          </ol>
+          <ol class="sub">
+            <li>(1)　＿＿＿＿年＿＿月＿＿日</li>
+            <li>(2)　本件建物の建替え工事の着手日</li>
+          </ol>
+          <ol>
+            <li>2．　甲は、本件建物の建替え工事の時期が具体的に決定したときは、その着手予定日の＿＿箇月前までに、乙及び丙に対し書面によりこれを通知するものとする。</li>
+            <li>3．　前項の通知の時期又は建替え工事の時期に変更が生じた場合においても、甲は、速やかに乙及び丙に対しこれを通知するものとする。</li>
+          </ol>
+
+          <h4>第5条（維持管理及び保安）</h4>
+          <ol>
+            <li>1．　丙は、液化石油ガスの保安の確保及び取引の適正化に関する法律その他の関係法令並びに行政庁の指導に従い、自らの責任と費用において本件設備の保安、点検及び維持管理を行うものとする。</li>
+            <li>2．　本件設備に起因して事故又は損害が生じた場合には、丙がその責任を負うものとする。ただし、乙の故意又は重大な過失に起因する場合は、この限りでない。</li>
+            <li>3．　丙は、本件設備の保安に関し甲又は乙から連絡を受けたときは、速やかに必要な措置を講ずるものとする。</li>
+          </ol>
+
+          <h4>第6条（期間満了時の撤去及び原状回復）</h4>
+          <ol>
+            <li>1．　第4条に定める期間が満了したときは、丙は、自らの責任と費用において本件設備を撤去し、その設置場所を原状に回復するものとする。</li>
+            <li>2．　前項の撤去及び原状回復に要する費用について、乙はこれを負担しない。</li>
+            <li>3．　撤去の具体的な時期及び方法については、乙の営業に配慮のうえ、甲乙丙が協議して定めるものとする。</li>
+          </ol>
+
+          <h4>第7条（本覚書の対象範囲）</h4>
+          <p>本覚書は、本件設備の設置及び使用に関する事項を対象とするものである。本件建物の屋上に設置されたダクトに関する事項その他本覚書に定めのない事項については、本覚書の対象に含まれず、必要に応じて別途協議するものとする。</p>
+
+          <h4>第8条（賃貸借契約との関係）</h4>
+          <ol>
+            <li>1．　本覚書は、甲乙間の＿＿＿＿年＿＿月＿＿日付建物賃貸借契約の内容を変更するものではない。</li>
+            <li>2．　本件建物の建替えに伴う本件店舗の明渡しの時期及び条件については、本覚書はこれを定めるものではなく、別途甲乙間において協議して定めるものとする。</li>
+          </ol>
+
+          <h4>第9条（従前の経緯の確認）</h4>
+          <p>甲乙丙は、本件設備の設置に至る従前の経緯のいかんにかかわらず、本覚書の締結をもって本件設備の設置及び使用に関する三者の認識が一致したことを確認し、当該経緯に関し、相互に異議を述べ、又は何らの請求も行わないものとする。</p>
+
+          <h4>第10条（協議）</h4>
+          <p>本覚書に定めのない事項又は本覚書の条項の解釈につき疑義が生じた事項については、甲乙丙が誠意をもって協議のうえ、解決するものとする。</p>
+
+          <hr>
+          <p>以上、本覚書の成立を証するため、本書3通を作成し、甲乙丙記名押印のうえ、各自1通を保有する。</p>
+
+          <p class="flush" style="margin-top:1rem"><strong>物件の表示</strong></p>
+          <table>
+            <tr><th>所在</th><td>沖縄県那覇市久茂地＿丁目＿番＿号</td></tr>
+            <tr><th>名称</th><td>久茂地リバーサイドテラス</td></tr>
+            <tr><th>本件店舗</th><td>同建物＿階（面積　約＿＿㎡）</td></tr>
+          </table>
+
+          <p class="flush" style="margin-top:1.2rem">＿＿＿＿年　＿＿月　＿＿日</p>
+
+          <div class="sig">
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>甲（貸主）　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>乙（借主）　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>丙（ガス供給者）　住所</span>
+                <span>名称　協和ガス株式会社</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+
+      <button class="toggle" type="button" data-target="wrap-a" aria-expanded="false">全文を表示</button>
+      <p class="doc__note">契約書としての体裁が最も整っており、責任の所在が明確です。一方で、先方からのお手紙が手紙調であることを踏まえると<strong>体裁が合わず、こちらが身構えたと受け取られる恐れ</strong>があります。</p>
+    </article>
+
+    <!-- ============ B ============ -->
+    <article class="doc doc--rec">
+      <div class="doc__head">
+        <div class="doc__title">
+          <span class="doc__key">B</span>
+          <h2>覚書（マイルド版）</h2>
+          <span class="badge">推奨</span>
+        </div>
+        <dl class="spec">
+          <dt>体裁</dt><dd>です・ます調・全7項</dd>
+          <dt>分量</dt><dd>約2枚</dd>
+          <dt>守り</dt><dd>中<span class="meter"><i class="on"></i><i class="on"></i><i></i></span></dd>
+          <dt>摩擦</dt><dd>小<span class="meter"><i class="warn"></i><i></i><i></i></span></dd>
+        </dl>
+      </div>
+
+      <div class="sheet-wrap" id="wrap-b">
+        <div class="sheet">
+          <h3>ガス設備の継続使用に関する覚書</h3>
+          <p>＿＿＿＿＿＿＿＿（以下「甲」といいます。）、＿＿＿＿＿＿＿＿（以下「乙」といいます。）及び協和ガス株式会社（以下「丙」といいます。）は、後記物件の表示記載の建物（以下「本件建物」といいます。）内で乙が営業する店舗（以下「本件店舗」といいます。）において使用しているガス設備につきまして協議を行い、下記のとおり確認いたしましたので、本覚書を取り交わします。</p>
+
+          <p class="center">記</p>
+
+          <h4>1．対象となる設備</h4>
+          <p>本覚書の対象となる設備（以下「本件設備」といいます。）は、GHP空調機＿＿台、ガスバルク貯槽＿＿基（容量＿＿kg）、ガス配管その他の付属設備一式及びガス器具一式とし、その所有者は丙です。設置場所は、本覚書締結日現在の場所（別紙の配置図及び写真のとおり）といたします。</p>
+
+          <h4>2．継続しての設置及び使用について</h4>
+          <p>甲には、本件建物の建替え工事に着手するまでの間、本件設備を現在の場所に引き続き設置し、乙がこれを使用することをご了承いただきました。この期間中は現状のまま据え置くこととし、移設や撤去は行わないことといたします。</p>
+          <p>なお、乙及び丙は、この期間中、甲にご相談することなく設置場所を変更したり、設備を増設したりすることはいたしません。</p>
+
+          <h4>3．期間</h4>
+          <p>前項の期間は、本覚書の日から、＿＿＿＿年＿＿月＿＿日又は本件建物の建替え工事の着手日のいずれか早い日までといたします。</p>
+          <p>建替え工事の時期が決まりましたら、甲より、その着手予定日の＿＿箇月前までに、乙及び丙へお知らせいただくことといたします。時期に変更が生じた場合も同様といたします。</p>
+
+          <h4>4．設備の管理について</h4>
+          <p>本件設備の保安、点検及び維持管理は、関係法令に従い、丙が責任をもって行います。甲又は乙よりご連絡をいただいた場合には、丙が速やかに対応いたします。本件設備に起因して事故が生じた場合の対応につきましても、丙において行います。</p>
+
+          <h4>5．期間満了後の取扱い</h4>
+          <p>前記の期間が満了しましたら、丙が自らの費用で本件設備を撤去し、設置場所を原状に回復いたします。この撤去に要する費用を乙が負担することはありません。</p>
+          <p>撤去の時期や方法につきましては、乙の営業に配慮のうえ、甲乙丙の三者で相談して決めることといたします。</p>
+
+          <h4>6．本覚書の範囲について</h4>
+          <p>本覚書は、本件設備に関する確認であり、本件建物の屋上ダクトの件など、ここに記載のない事項を対象とするものではありません。また、甲乙間の賃貸借契約の内容や、建替えに伴う本件店舗の明渡しの時期・条件を定めるものでもありません。これらにつきましては、必要に応じて別途ご相談させていただきます。</p>
+
+          <h4>7．これまでの経緯について</h4>
+          <p>本件設備の設置に至るこれまでの経緯につきましては、本覚書により甲乙丙三者の認識が一致したことを確認し、今後、相互にこれを問題としないことといたします。</p>
+
+          <hr>
+          <p>本覚書に定めのない事項や、内容について確認が必要となった事項につきましては、甲乙丙の三者で誠意をもって話し合い、解決するものといたします。</p>
+          <p>以上、本覚書の成立を証するため、本書3通を作成し、甲乙丙記名押印のうえ、各自1通を保有いたします。</p>
+
+          <p class="flush" style="margin-top:1rem"><strong>物件の表示</strong></p>
+          <table>
+            <tr><th>所在</th><td>沖縄県那覇市久茂地＿丁目＿番＿号</td></tr>
+            <tr><th>名称</th><td>久茂地リバーサイドテラス</td></tr>
+            <tr><th>本件店舗</th><td>同建物＿階（面積　約＿＿㎡）</td></tr>
+          </table>
+
+          <p class="flush" style="margin-top:1.2rem">＿＿＿＿年　＿＿月　＿＿日</p>
+
+          <div class="sig">
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>甲（貸主）　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>乙（借主）　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>丙（ガス供給者）　住所</span>
+                <span>名称　協和ガス株式会社</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+
+      <button class="toggle" type="button" data-target="wrap-b" aria-expanded="false">全文を表示</button>
+      <p class="doc__note">契約書には見えませんが、<strong>守るべき内容は落としていません</strong>。面談を先に行い「先日のご確認」として渡す前提であれば、これで硬すぎる印象にはなりません。</p>
+    </article>
+
+    <!-- ============ C ============ -->
+    <article class="doc">
+      <div class="doc__head">
+        <div class="doc__title">
+          <span class="doc__key">C</span>
+          <h2>ご確認（カジュアル版）</h2>
+        </div>
+        <dl class="spec">
+          <dt>体裁</dt><dd>です・ます調・全5項</dd>
+          <dt>分量</dt><dd>A4一枚</dd>
+          <dt>守り</dt><dd>弱<span class="meter"><i class="on"></i><i></i><i></i></span></dd>
+          <dt>摩擦</dt><dd>最小<span class="meter"><i></i><i></i><i></i></span></dd>
+        </dl>
+      </div>
+
+      <div class="sheet-wrap" id="wrap-c">
+        <div class="sheet">
+          <h3>ガス設備の設置に関するご確認</h3>
+          <p>久茂地リバーサイドテラス＿＿階の＿＿＿＿＿＿（焼肉ロインズ久茂地店）で使用しておりますガス設備につきまして、下記のとおり確認させていただきました。</p>
+
+          <p class="center">記</p>
+
+          <h4>1．対象となる設備</h4>
+          <p>GHP空調機＿＿台、ガスバルク貯槽＿＿基、ガス配管及びガス器具一式（協和ガス株式会社の所有）。設置場所は現在の場所のままとします。</p>
+
+          <h4>2．設置の期間</h4>
+          <p>ビルの建替え工事に着手するまでの間、現在の場所にそのまま設置し、使用させていただきます。この間、移設や撤去は行いません。</p>
+          <p>期間は本書の日から、＿＿＿＿年＿＿月＿＿日又は建替え工事の着手日のいずれか早い日までといたします。</p>
+
+          <h4>3．建替え時期のご連絡</h4>
+          <p>建替えの時期が決まりましたら、着手予定日の＿＿箇月前までにご連絡をお願いいたします。</p>
+
+          <h4>4．設備の管理と撤去</h4>
+          <p>設備の点検・管理は協和ガス株式会社が行います。</p>
+          <p>建替えの際は、協和ガス株式会社が費用を負担して設備を撤去し、設置場所を元に戻します。店舗側での費用負担はありません。撤去の時期や進め方は、店舗の営業に支障が出ないよう、三者で相談させていただきます。</p>
+
+          <h4>5．その他</h4>
+          <p>本書はガス設備についての確認です。屋上ダクトの件や、建替えに伴う店舗の明渡し（移転）の時期・条件などにつきましては、本書では取り扱っておりませんので、改めてご相談させてください。</p>
+          <p>設備の設置に至るこれまでの経緯につきましては、本書をもってお互いの認識が一致したものとし、今後は問題としないことといたします。</p>
+
+          <hr>
+          <p>上記のとおり相違ありません。本書は3通作成し、それぞれ1通ずつ保管いたします。</p>
+
+          <p class="flush" style="margin-top:1.2rem">＿＿＿＿年　＿＿月　＿＿日</p>
+
+          <div class="sig">
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>貸主　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>借主　住所</span>
+                <span>名称</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+            <div class="sig__row">
+              <div class="sig__lines">
+                <span>ガス供給者　住所</span>
+                <span>名称　協和ガス株式会社</span>
+                <span>代表者</span>
+              </div>
+              <div class="seal">印</div>
+            </div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+
+      <button class="toggle" type="button" data-target="wrap-c" aria-expanded="false">全文を表示</button>
+      <p class="doc__note">最も摩擦が小さい一方、「誰が撤去しない義務を負うのか」が曖昧で、<strong>事故時の責任に関する記載もありません</strong>。建替えが前倒しになったときに押し返す力が弱くなります。</p>
+    </article>
+
+  </div>
+
+  <section class="closing">
+    <h2>判断のご依頼</h2>
+    <p>A・B・C のいずれで進めるか、ご判断をお願いします。B で問題なければ、空欄を埋めて最終版を作成します。</p>
+    <p>いずれの案も、金銭の授受に関する定めを置いていないため収入印紙は不要です。屋上ダクトの件は本書面の対象外としているため、別途の対応方針が必要です。</p>
+  </section>
+
+</div>
+
+<script>
+  document.querySelectorAll(".toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var wrap = document.getElementById(btn.dataset.target);
+      var open = wrap.classList.toggle("is-open");
+      btn.setAttribute("aria-expanded", String(open));
+      btn.textContent = open ? "折りたたむ" : "全文を表示";
+      if (!open) wrap.scrollIntoView({ block: "nearest" });
+    });
+  });
+</script>
